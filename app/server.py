@@ -78,7 +78,8 @@ def create():
         try: mins = float(b.get("interview_minutes", 15) or 0)
         except (TypeError, ValueError): return jsonify(error="Longer cut length must be a number of minutes."), 400
         try: return jsonify(id=studio.create_interview(b.get("src_path", ""), b.get("interview_context", ""), ex, b.get("interview_thanks", ""),
-                                                       str(b.get("interview_back_camera", "1")).lower() not in ("0", "false", "off", ""), mins))
+                                                       str(b.get("interview_back_camera", "1")).lower() not in ("0", "false", "off", ""), mins,
+                                                       str(b.get("interview_my_voice", "0")).lower() in ("1", "true", "on")))
         except ValueError as e: return jsonify(error=str(e)[:300]), 400
     sp = (b.get("src_path") or "").strip().strip('"')
     if sp and not (f and f.filename):   # a file on this PC by path (the /make page can't put a file into an upload field)
@@ -298,6 +299,19 @@ def edit_chat_log(jid):
     j = studio.job(jid); bid = request.args.get("beat")
     return jsonify(chat=[e for e in (j.state.get("debug") or {}).get("chat", []) if not bid or e.get("beat") == bid])
 
+@app.post("/api/jobs/<jid>/edit/upload")
+def edit_upload(jid):
+    """A camera recording made in the editor (or a video picked in the browser): saved with the job; -> its path."""
+    import time as _time
+    from pathlib import Path as _P
+    j = studio.job(jid); f = request.files.get("file")
+    if not f or not f.filename: return jsonify(error="no file"), 400
+    ext = _P(f.filename).suffix.lower() or ".webm"
+    if ext not in (".webm", ".mp4", ".mov", ".m4v", ".mkv"): return jsonify(error="video files only"), 400
+    d = _P(j.dir) / "iedit" / "commentary" / "rec"; d.mkdir(parents=True, exist_ok=True)
+    out = d / f"rec_{int(_time.time())}{ext}"; f.save(str(out))
+    return jsonify(path=str(out))
+
 @app.post("/api/jobs/<jid>/edit/<action>/<bid>")
 def edit_act(jid, action, bid):
     from studio import edit, gpu_lock
@@ -312,6 +326,17 @@ def edit_act(jid, action, bid):
                 return jsonify(edit.preview(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log))
         if action == "apply":
             err = edit.start_apply(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log)
+            return (jsonify(error=err), 409) if err else jsonify(ok=True)
+        if action == "voice":   # owner, 2026-11-09: your commentary read in your US voice (camera audio dropped), or back
+            if not edit._iv(j.dir): return jsonify(error="Only interview videos have commentary pieces"), 400
+            from studio import interview_edit as ie
+            err = ie.set_voice(j.dir, bid, bool(b.get("on")), cfg, j.log)
+            return (jsonify(error=err), 409) if err else jsonify(ok=True)
+        if action in ("insert", "fade"):   # owner, 2026-11-09: your own commentary between pieces; fade a piece in / out
+            if not edit._iv(j.dir): return jsonify(error="Commentary and fades work on interview videos for now"), 400
+            from studio import interview_edit as ie
+            err = (ie.insert_commentary(j.dir, bid, b.get("src", ""), cfg, j.log, "before" if b.get("where") == "before" else "after", bool(b.get("synthetic")))
+                   if action == "insert" else ie.set_fade(j.dir, bid, bool(b.get("in")), bool(b.get("out")), cfg, j.log))
             return (jsonify(error=err), 409) if err else jsonify(ok=True)
     except Exception as e:
         return jsonify(error=str(e)[:300]), 400
@@ -335,6 +360,17 @@ def edit_all(jid, action):
             if not ok:
                 return jsonify(error=holder), 409
             studio.rerender(jid, str(b.get("target") or ""), bool(b.get("refresh_fallbacks")), editor_owned=True)
+        elif action == "defects":   # owner, 2026-11-10: a Vision Checker defect report -> only those stretches re-made
+            if not edit._iv(j.dir): return jsonify(error="Defect reports work on interview videos for now"), 400
+            from studio import interview_edit as ie
+            rep = b.get("report") or b.get("path") or ""
+            if not rep: return jsonify(error="paste a report, drop a .json file, or give its path"), 400
+            if b.get("plan_only"): return jsonify(plan=ie.defect_plan(j.dir, rep))
+            ok, holder = _editor_owner(jid, sid)
+            if not ok:
+                return jsonify(error=holder), 409
+            err = ie.start_rework(j.dir, rep, config.load(), j.log)
+            return (jsonify(error=err), 409) if err else jsonify(ok=True)
         elif action == "cleanup":
             review.prune(j.dir, j.log, full=True)
             if (j.dir / "longedit").exists(): review.prune(j.dir / "longedit", j.log, full=True)
@@ -615,4 +651,17 @@ if __name__ == "__main__":
     # VS_RELOAD=1: restart automatically when a .py file changes (development only - it also stops a running render;
     # the job is then marked stopped and Resume continues it)
     reload = os.environ.get("VS_RELOAD") == "1"
+    if not reload or os.environ.get("WERKZEUG_RUN_MAIN"):   # owner, 2026-11-09: finished videos not yet in Google Photos go up now
+        try:
+            from studio import cloud_backup
+            n = cloud_backup.sweep(config.load()["jobs_dir"])
+            if n: print(f"Google Photos backup: {n} finished job(s) queued", flush=True)
+        except Exception as e:
+            print(f"Google Photos backup sweep skipped: {e}", flush=True)
+        try:   # owner, 2026-11-12: every finished video (and its linked Short) is saved Private on the main channel
+            from studio import youtube_main
+            n = youtube_main.sweep(config.load()["jobs_dir"])
+            if n: print(f"Main channel save: {n} finished job(s) queued", flush=True)
+        except Exception as e:
+            print(f"Main channel save sweep skipped: {e}", flush=True)
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True, use_reloader=reload)

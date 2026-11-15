@@ -37,6 +37,7 @@ DEFAULTS = {
     "imagegen_providers": ["cloudflare", "hf", "flow", "chatgpt", "bing", "meta", "gemini"],   # flow: 0-credit stills (route r14)
     "cloudflare_account_id": "",
     "cloudflare_api_token": "",       # a permanent Cloudflare API token (Account > Workers AI); kept in the Windows vault
+    "sketchfab_api_token": "",        # optional (sketchfab.com > Settings > API): CC0 / CC-BY models for the 3D studio; Windows vault
     # media routes (2026-11-06): studio/routelib (moved in from the media-poc setup page) runs on this app's Python; signed-in browser
     # profiles + route outputs live here. "" = <jobs_dir parent>\media_routes. Sign in to a site: scripts\media-login.ps1 <site>
     "media_routes_data": "",
@@ -153,6 +154,11 @@ DEFAULTS = {
     "voice_by_subject": True,         # Kokoro narrator picked per job to suit the subject (tts.VOICE_MENU)
     "ladder_v2": False,               # master switch for the v2 order (Shorts: short.do_fallback; explainers: render.do_stills / do_motion)
     "graphics_secs": 8,               # length of a rendered GRAPHICS clip (6-10 s)
+    "studio3d_on": True,              # owner 2026-11-13: a real 3D model in a studio (Blender) ahead of the drawn graphics
+    "studio3d_models_dir": r"F:\videos\models",   # the owner's model library (<name>/model.json) + download cache
+    "coded_model_on": "auto",         # 3D model written in code: "auto" = only when Claude writes it (anthropic key); True / False
+    "studio3d_samples": 32, "studio3d_fps": 24, "studio3d_max_secs": 10, "studio3d_timeout": 1500,
+    "motion_rung": True, "motion_look": "paper",   # owner, 2026-11-12: drawn animation = last resort before the card; paper | whiteboard
     "graphics_claude": True,          # v2: when no template fits, Claude writes a Remotion composition for the beat
     "graphics_claude_model": "",      # "" = script_model with the Anthropic key; falls back to the script provider without one
     "graphics_claude_max_per_video": 3,   # cost cap: Claude-written compositions per video (one write + one repair each)
@@ -171,7 +177,8 @@ DEFAULTS = {
     "aisstream_api_key": "",          # optional (aisstream.io, free): live AIS position for ship_route when the narration gives an MMSI
 }
 
-SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key", "aisstream_api_key", "hf_token", "cloudflare_api_token")
+SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key", "aisstream_api_key", "hf_token", "cloudflare_api_token",
+           "sketchfab_api_token")
 
 VAULT = "ExplainerStudio"   # shared with Explainer Studio so saved keys carry over
 

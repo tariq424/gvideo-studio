@@ -30,7 +30,9 @@ export const MapBackdrop: React.FC<{ g: Extract<Backdrop, { kind: "map" }>; dur:
   const cx = (Math.min(...lons) + Math.max(...lons)) / 2, cy = (Math.min(...lats) + Math.max(...lats)) / 2;
   // square-ish window (the map area is ~1:1) just big enough for all points plus a margin, at least 8 degrees across
   const half = Math.max(4, (Math.max(...lons) - Math.min(...lons)) * 0.75, (Math.max(...lats) - Math.min(...lats)) * 0.9);
-  const box = { type: "MultiPoint", coordinates: [[cx - half, cy - half * 0.85], [cx + half, cy + half * 0.85]] } as any;
+  // (2026-11-12: a long-haul route, Dubai -> New York, drew an empty map: the window ran past +-90 latitude, which Mercator
+  // cannot show; keep it inside +-80)
+  const box = { type: "MultiPoint", coordinates: [[cx - half, Math.max(-80, cy - half * 0.85)], [cx + half, Math.min(80, cy + half * 0.85)]] } as any;
   const tall = height > width;   // Shorts (portrait) keep the top and the caption zone clear; landscape uses the full frame
   const top = tall ? 300 : 150, bottom = tall ? 1330 : height - 150;
   const zoom = interpolate(t, [0, dur], [1.0, 1.06]);

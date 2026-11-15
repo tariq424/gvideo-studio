@@ -377,7 +377,7 @@ def _vis_source(v):
 
 RUNG_NAMES = {"own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "source": "Source clip", "imagegen": "AI image",
               "meta chain": "Meta image → video (from a snapshot)", "meta video": "Meta video", "flow": "Google Flow video",
-              "blender": "Blender scene", "still": "WanGP still", "animate": "WanGP animation", "parallax": "AI still + parallax",
+              "blender": "Blender scene", "studio3d": "3D studio render", "still": "WanGP still", "animate": "WanGP animation", "parallax": "AI still + parallax",
               "simulation": "Physics simulation", "graphics": "Remotion graphics", "headline": "Headline card", "map": "Map",
               "cloud": "Cloud still", "reconstruction": "3D reconstruction", "illustration": "Illustration", "silhouette": "Silhouette"}
 SITES = {"cloudflare": "Cloudflare", "hf": "Hugging Face", "chatgpt": "ChatGPT", "bing": "Bing", "meta": "Meta", "gemini": "Gemini"}
@@ -396,6 +396,7 @@ def rung_label(it):
     if rung == "imagegen" and it.get("site"): return f"{SITES.get(it['site'], it['site'])} image" + (" + parallax" if it.get("type") == "layers" else "")
     if rung == "source" or tag.startswith("SOURCE") or "source_excerpts/" in src: return "Source clip"
     if rung == "blender" or "BLENDER" in tag: return "Blender scene"
+    if rung == "studio3d" or tag in ("3D RENDER", "GENERATED · 3D") or "studio3d" in src: return "3D studio render"
     if rung == "flow" or "FLOW" in tag: return "Google Flow video"
     if rung == "meta video" or (tag.endswith("· META") and it.get("type") == "video"): return "Meta video"
     if rung == "simulation" or tag in ("SIMULATION", "SYNTHETIC") or src.endswith("_physics.mp4"):

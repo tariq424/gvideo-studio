@@ -76,6 +76,23 @@ _slocks, _slocks_lk = {}, threading.Lock()
 def _state_lock(d):
     with _slocks_lk: return _slocks.setdefault(str(d), threading.RLock())
 
+def _backup(j, log):
+    """owner, 2026-11-09: every finished video goes to his Google Photos (F: is a USB drive), and his own footage's day is
+    indexed into the media database - in the background, never holding up or failing the job (cloud_backup)."""
+    try:
+        from . import cloud_backup
+        cloud_backup.queue(j.dir)
+        log("Backing up to Google Photos in the background (output/gphotos_backup.json, backup.log)")
+    except Exception as e:
+        log(f"Google Photos backup not queued ({type(e).__name__}: {str(e)[:120]})")
+    try:   # owner, 2026-11-12: every successfully finished video is also saved Private on his main YouTube channel
+        from . import youtube_main
+        youtube_main.queue(j.dir, delay=60)
+        log("Saving to the main YouTube channel (Private) in the background (output/youtube_main.json, backup.log)")
+    except Exception as e:
+        log(f"Main channel save not queued ({type(e).__name__}: {str(e)[:120]})")
+
+
 class Job:
     def __init__(self, path): self.dir = Path(path)
     @property
@@ -240,7 +257,7 @@ class Studio:
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
 
-    def create_interview(self, src, context="", extras=None, thanks="", back_camera=True, minutes=15):
+    def create_interview(self, src, context="", extras=None, thanks="", back_camera=True, minutes=15, my_voice=False):
         """Your own interview footage (owner, 2026-11-08): the real conversation leads - a preview of later moments, background
         lines, then your questions and the guest's answers in order, with commentary where the guest gets specific. Makes a
         Short and a longer cut (studio/interview.py), opened as an interview job you can edit (studio/interview_edit.py)."""
@@ -261,7 +278,7 @@ class Studio:
         j.save(kind="interview", url="", mode="both", minutes=0, captions=True, auto_approve=True, visual_review="never", status="queued",
                stage="interview", done=[], title="", created=time.time(), priority="normal", src_title=src.name,
                interview={"src": str(src), "context": str(context or "").strip(), "extras": ex, "thanks": str(thanks or "").strip(),
-                          "back_camera": bool(back_camera), "minutes": max(0.0, min(30.0, float(minutes or 0)))})
+                          "back_camera": bool(back_camera), "minutes": max(0.0, min(30.0, float(minutes or 0))), "my_voice": bool(my_voice)})
         j.log(f"Interview job created for {src}" + (f" (+{len(ex)} more clip(s))" if ex else "")); self._enqueue(jid); return jid
 
     def _interview(self, j, s, cfg, log):
@@ -276,6 +293,7 @@ class Studio:
         cfg["interview_back_camera"] = bool(iv.get("back_camera", True))
         cfg["interview_cutaways"] = bool(cfg.get("interview_cutaways", True))
         cfg["interview_target_min"] = float(iv.get("minutes", 15) or 0)
+        cfg["interview_my_voice"] = bool(iv.get("my_voice", False))   # owner, 2026-11-09: narration in your own voice, US accent
         work = j.dir / "iwork"
         name = re.sub(r"[^A-Za-z0-9]+", "_", src.stem).strip("_").lower()[:40] or "interview"
         j.save(stage="interview", prog={"out": "short", "stage": "interview", "n": 0, "of": 0})
@@ -292,6 +310,7 @@ class Studio:
         j.save(status="finished", stage="done", done=["interview"], title=title or src.stem, output=outs.get("long"), short_output=outs.get("short"),
                edit_target="short" if outs.get("short") else "long", prog={"out": "short", "stage": "done", "n": 0, "of": 0})
         log("Finished.")
+        _backup(j, log)
 
     def approve(self, jid):
         j = self.job(jid); s = j.state
@@ -734,6 +753,7 @@ class Studio:
                 log(f"Quality check skipped ({type(e).__name__}: {str(e)[:200]})")
         release_gpu()
         j.save(status="finished", stage="done"); log("Finished.")
+        _backup(j, log)
         if j.state.get("trace"):
             debug.trace(j.dir, {"ev": "finished"}); p = debug.render_md(j.dir)
             if p: log(f"Debug trace: {p}")

@@ -475,7 +475,11 @@ def _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras
                         inp.first.set_input_files(str(image)); page.wait_for_timeout(5000); used = True
                 except Exception:
                     used = False
-            if used:
+            if used and str(vo).startswith("EDIT:"):   # owner, 2026-11-09: change a real picture (the person out, a planned terrace in)
+                prompt = (f"Edit this photo: {str(vo)[5:].strip()[:900]} Keep it photorealistic and keep everything else as it is in the photo. "
+                          f"{shape} No text, letters, logos or brand names.")
+                log(f"  chatgpt: photo attached ({Path(image).name}); asking for an edit")
+            elif used:
                 prompt = ("Create a new, original image inspired by the scene in this screenshot: keep its subject and mood, "
                           f"use a fresh composition. {shape} {rules}")
                 log(f"  chatgpt: screenshot attached ({Path(image).name}); asking for an image of that scene")

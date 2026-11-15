@@ -141,9 +141,17 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text="", timeline=None):
     pause), without it a compressor ducks the music under the voice."""
     if not cfg.get("music_on", True): return False
     mp4 = Path(mp4); rng = random.Random(seed)
-    hm, bm = moods_for(cfg, text, log)
-    log(f"  music: moods hook={hm}, bed={bm}")
-    hook, bed = choose(cfg, "hook", hm, rng, log), choose(cfg, "bed", bm, rng, log)
+    was = mp4.parent / (mp4.stem + "_music.json")   # owner, 2026-11-09: an edit keeps the video's music (each re-assembly
+    try: was = json.loads(was.read_text(encoding="utf-8")) if cfg.get("music_keep", True) and was.exists() else None   # had
+    except (OSError, ValueError): was = None                                                                            # re-picked it)
+    if was and (not was.get("hook") or Path(was["hook"]).exists()) and (not was.get("bed") or Path(was["bed"]).exists()):
+        hm, bm = (list(was.get("moods") or []) + ["", ""])[:2]
+        hook, bed = (Path(was["hook"]) if was.get("hook") else None), (Path(was["bed"]) if was.get("bed") else None)
+        log(f"  music: kept from the last cut ({hook.name if hook else '-'} + {bed.name if bed else '-'})")
+    else:
+        hm, bm = moods_for(cfg, text, log)
+        log(f"  music: moods hook={hm}, bed={bm}")
+        hook, bed = choose(cfg, "hook", hm, rng, log), choose(cfg, "bed", bm, rng, log)
     if not hook and not bed:
         log(f"  music: no tracks in the library ({folder(cfg)}); no music added"); return False
     try:

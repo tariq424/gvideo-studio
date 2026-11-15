@@ -48,7 +48,7 @@ def test_shots_holder_closeup_becomes_cutaway():
     from studio import shots
     an = {"secs": [{"t": t, "faces": ([[0.5, 0.4, 0.3, 0.3]] if t < 3 else [[0.3, 0.4, 0.1, 0.12]]), "tilt": 0} for t in range(6)]}
     sh = shots.plan_shots(an, 0, 6)
-    assert [x[2] for x in sh] == ["self", "guest"] and sh[1][3][0] == 0.3
+    assert [x[2] for x in sh] == ["vlog", "guest"] and sh[1][3][0] == 0.3   # Nov 9: the creator's face = a vlog shot, kept as filmed
     assert "rotate=" in shots.vf_frame("documentary", None, 6.0) and "rotate=" not in shots.vf_frame("documentary", None, 1.0)
 
 
@@ -56,8 +56,8 @@ def test_shots_two_shot_selfie_and_edge_holder():
     from studio import shots
     # close selfie: two big faces -> the bigger one is the holder, the other the guest
     assert shots.kind_of({"faces": [[0.3, 0.5, 0.22, 0.3], [0.7, 0.4, 0.36, 0.5]]}) == "guest"
-    # the holder half out of shot at the right edge, alone -> cutaway
-    assert shots.kind_of({"faces": [[0.97, 0.5, 0.06, 0.7]]}) == "self"
+    # the creator half out of shot at the right edge, alone -> a vlog shot (Nov 9: kept as filmed)
+    assert shots.kind_of({"faces": [[0.97, 0.5, 0.06, 0.7]]}) == "vlog"
     # a tiny face (a mirror) is nobody
     assert shots.kind_of({"faces": [[0.5, 0.5, 0.03, 0.05]]}) == "none"
     # car ceiling: flat top, the guest's head poking up at the bottom -> cutaway
@@ -115,12 +115,27 @@ def test_cut_points_join_without_repeats():
     assert a1 <= b0 and a1 > segs[1]["end"] and b0 < segs[2]["start"]
 
 
-def test_missed_seconds_beside_holder_are_covered():
+def test_missed_seconds_beside_the_creator_stay_as_filmed():
     from studio import shots
-    secs = [{"t": 0, "faces": [[0.5, 0.5, 0.5, 1.0]], "tilt": 0}, {"t": 1, "faces": [], "tilt": 0}, {"t": 2, "faces": [], "tilt": 0},
-            {"t": 3, "faces": [[0.5, 0.5, 0.5, 1.0]], "tilt": 0}] + [{"t": t, "faces": [], "tilt": 0} for t in range(4, 12)]
+    framed = [0.5, 0.45, 0.22, 0.4]   # the creator at arm's length: fine (Nov 9)
+    secs = [{"t": 0, "faces": [framed], "tilt": 0}, {"t": 1, "faces": [], "tilt": 0}, {"t": 2, "faces": [], "tilt": 0},
+            {"t": 3, "faces": [framed], "tilt": 0}] + [{"t": t, "faces": [], "tilt": 0} for t in range(4, 12)]
     sh = shots.plan_shots({"secs": secs}, 0, 12)
-    assert sh[0][2] == "self" and sh[0][1] >= 5 and sh[-1][2] == "none"
+    assert not any(x[2] in ("self", "empty") for x in sh)
+
+
+def test_giant_face_and_the_chin_between_are_covered():
+    """Nov 9, owner: "I can be in the picture but not such a giant face of closeup" - a face filling the frame, and the
+    faceless seconds of his chin / neck between two such close-ups, are covered; a framed one stays."""
+    from studio import shots
+    giant = [0.5, 0.5, 0.5, 1.0]
+    secs = [{"t": 0, "faces": [giant], "tilt": 0}] + [{"t": t, "faces": [], "tilt": 0} for t in range(1, 9)] +            [{"t": 9, "faces": [giant], "tilt": 0}] + [{"t": t, "faces": [[0.5, 0.45, 0.22, 0.4]], "tilt": 0} for t in range(10, 16)]
+    sh = shots.plan_shots({"secs": secs}, 0, 16)
+    assert sh[0][2] == "self" and sh[0][1] >= 10   # the close-up and the chin run under it
+    assert sh[-1][2] == "vlog"
+    assert not shots.too_close([0.97, 0.5, 0.06, 0.7])   # a sliver at the edge is still fine
+    back = [dict(x, back=True) for x in secs]   # back camera: no chin rule (the faces there are the guest's)
+    assert shots.chin_runs(["self", "none", "self"], ("self",), back=True) == ["self", "none", "self"]
 
 
 def test_trip_footage_place_subject_scenery(tmp_path):

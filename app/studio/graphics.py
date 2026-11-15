@@ -19,7 +19,7 @@ import hashlib, json, re, shutil, subprocess, time
 from pathlib import Path
 from . import media
 
-TEMPLATES = ("stat", "quote", "timeline", "compare", "route", "chart", "list", "abstract")
+TEMPLATES = ("stat", "quote", "timeline", "compare", "route", "chart", "list", "abstract", "place", "figure")
 FPS = 30
 
 CLASSIFY = """A vertical news video needs an animated GRAPHIC for one beat (no footage fits it). The narrator says:
@@ -35,6 +35,8 @@ or quotes). Templates and their data:
 - chart: 3-8 values of one measure (over time or across things). {{"title": "short", "style": "bar" or "line", "unit": "", "prefix": "", "suffix": "", "decimals": 0, "points": [{{"label": "2019", "value": 12}}]}}
 - list: 3-5 parallel points. {{"title": "short", "items": [{{"icon": "emoji", "text": "2-6 words"}}]}}
 - abstract: a general statement with no data, place or sequence. {{"kicker": "1-2 words", "text": "4-10 words summing up the beat", "sub": "optional"}}
+- place: ONE real place to point out on a map (a town, an island, a street area), coordinates you are sure of. {{"name": "Hamilton", "sub": "Bermuda", "lat": 32.29, "lon": -64.78, "span": 1.0}} (span: degrees across at the end, 0.15 for a town, 2 for a small country)
+- figure: a human point made with simple stick figures - someone deciding, explaining, not knowing what to do, moving away, a conversation, a sign of protest. NOT for a specific real place, building, object or event a picture should show. {{"pose": "point|think|shrug|talk|walk|sign", "people": 1, "prop": "house|shop|mosque|plane|boat|car|money|question|none", "caption": "max 8 words", "sign": "max 3 words, only for pose sign", "say": ["max 5 words", "optional reply"]}}
 - none: the beat needs a specific picture of a process, mechanism, object or scene that none of these can show.
 Reply with ONLY JSON: {{"template": "stat|quote|timeline|compare|route|chart|list|abstract|none", "data": {{...}}, "why": "max 12 words"}}"""
 
@@ -105,6 +107,11 @@ def _valid(t, d):
         return {**d, "points": pts} if len(pts) >= 2 else None
     if t == "list": return d if len(d.get("items") or []) >= 2 else None
     if t == "abstract": return d if d.get("text") else None
+    if t == "place":
+        lat, lon = _num(d.get("lat")), _num(d.get("lon"))
+        return d if d.get("name") and lat is not None and lon is not None and -85 < lat < 85 and -180 <= lon <= 180 else None
+    if t == "figure":
+        return d if d.get("pose") in ("point", "think", "shrug", "talk", "walk", "sign") else None
     return None
 
 
@@ -151,6 +158,8 @@ def _hard(e):
 def render_template(cfg, sd, t, data, secs, out, log, tag=None):
     """Template -> MP4 at out. tag (e.g. "GRAPHICS") burns the label in (explainers); Shorts get it from Shot instead."""
     from . import review
+    if t in ("place", "figure") and isinstance(data, dict) and not data.get("look"):   # the motion rung's look (paper | whiteboard)
+        data = dict(data, look=str(cfg.get("motion_look") or "paper"))
     bg = {"type": "graphic", "g": data if t == "motion" else {"kind": "tpl", "t": t, "d": data}}
     if tag: bg["tag"] = tag
     raw = Path(out).with_name(Path(out).stem + "_raw.mp4")
@@ -252,13 +261,18 @@ def claude_generate(cfg, sd, sec, secs, out, log, tag=None, ctx=""):
 
 
 # ---------------------------------------------------------------- the rung
-def make(cfg, sd, sec, key, log, tag=None, ctx=""):
+def make(cfg, sd, sec, key, log, tag=None, ctx="", allow=None, claude=None):
     """Rung 5 for one slot. sd = the workspace (job/short, or an explainer stills workspace with space.json); the clip goes to
-    sd/graphics/<key>.mp4. -> {"ok", "path", "how", "why", "hard", "template"}."""
+    sd/graphics/<key>.mp4. -> {"ok", "path", "how", "why", "hard", "template"}.
+    allow: only these templates (the early motion rung takes only what a drawing explains better than a picture);
+    claude: override graphics_claude (the motion rung never hands a line to a Claude-written composition)."""
     secs = max(6, min(10, int(cfg.get("graphics_secs", 8))))
     out = Path(sd) / "graphics" / f"{key}.mp4"; out.parent.mkdir(parents=True, exist_ok=True)
     if media.ok(out): return {"ok": True, "path": out, "how": "cached", "why": "", "hard": False, "template": None}
     c = classify(cfg, sec, log, ctx)
+    if allow is not None and c["template"] and c["template"] not in allow:
+        return {"ok": False, "path": None, "how": "none", "why": f"{c['template']} is not a motion-rung template", "hard": False, "template": c["template"]}
+    if claude is not None: cfg = dict(cfg, graphics_claude=claude)
     if c["template"]:
         try:
             render_template(cfg, sd, c["template"], c["data"], secs, out, log, tag=tag)

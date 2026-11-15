@@ -97,32 +97,43 @@ def clip_ok(cfg, clip, work, label=""):
 
 
 def image_to_video(img, out, secs, W, H, log=None):
-    """The local Python image-to-video maker: the picture cut (rembg, else depth) into background + subject, then a slow 2.5D
-    parallax rendered frame by frame in numpy/PIL and piped to ffmpeg (CPU only). No cut-out -> a Ken Burns push-in."""
-    from PIL import Image
+    """The local Python image-to-video maker. Owner, 2026-11-11 ("ghosting... the parallax is broken. fuzzy images and ghosting
+    are major issue"): the old cut-out parallax lifted the subject off a painted-in background, and the paint showed as grey
+    ghosts. Now nothing is cut out: one picture, each pixel nudged by its own depth (near moves more than far) plus a slow
+    push-in - a camera drift. The depth is softened so edges stretch a little instead of tearing; no holes, no doubles.
+    CPU only (Depth Anything V2 Small + OpenCV remap); no depth -> a Ken Burns push-in."""
+    from PIL import Image, ImageOps
     import numpy as np
     out = Path(out); secs = max(1.0, float(secs)); fps = 30; n = int(secs * fps)
     try:
+        import cv2
         from . import depth
-        L = depth.cutout_layers(str(img), str(out.with_suffix("")), log or (lambda m: None), size=(W, H))
+        S = 1.08   # overscan: the drift never shows an edge
+        cw, ch = int(W * S) // 2 * 2, int(H * S) // 2 * 2
+        im = ImageOps.fit(Image.open(img).convert("RGB"), (cw, ch), Image.LANCZOS)
+        dm = depth.depth_map(im, log or (lambda m: None)).astype(np.float32)
+        dm = cv2.GaussianBlur(dm, (0, 0), sigmaX=cw * 0.02)   # soft: a stretch at an edge, never a tear or a double
+        dm = dm - float(np.median(dm))                         # the middle distance stays put; near and far drift apart
+        src = cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
+        src = cv2.addWeighted(src, 1.35, cv2.GaussianBlur(src, (0, 0), 1.2), -0.35, 0)   # a light sharpen (AI stills are soft)
     except Exception as e:
-        L = None; _log(log, f"    image-to-video: no cut-out ({str(e)[:80]}); Ken Burns")
-    if not L or len(L) < 2:
+        _log(log, f"    image-to-video: no depth ({str(e)[:80]}); Ken Burns")
         from . import photos
         return Path(photos.kenburns(str(img), str(out), secs, (W, H), 0))
-    bg = Image.open(L[0]).convert("RGB").resize((int(W * 1.10), int(H * 1.10)), Image.LANCZOS)
-    fg = Image.open(L[-1]).convert("RGBA").resize((int(W * 1.14), int(H * 1.14)), Image.LANCZOS)
-    cmd = [media._bin("ffmpeg"), "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps), "-i", "-",
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", str(out)]
+    _log(log, "    parallax: depth drift (one picture, no cut-outs)")
+    xs, ys = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+    amp = W * 0.018   # at most ~1.8% of the width between nearest and farthest: gentle, so nothing smears
+    cmd = [media._bin("ffmpeg"), "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{W}x{H}", "-r", str(fps), "-i", "-",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p", str(out)]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         for i in range(n):
-            u = i / max(1, n - 1)
-            bx, by = int((bg.width - W) * (0.35 + 0.30 * u)), (bg.height - H) // 2
-            fx, fy = int((fg.width - W) * (0.65 - 0.30 * u)), (fg.height - H) // 2
-            fr = bg.crop((bx, by, bx + W, by + H)); layer = fg.crop((fx, fy, fx + W, fy + H))
-            fr.paste(layer, (0, 0), layer)
-            p.stdin.write(np.asarray(fr, dtype=np.uint8).tobytes())
+            u = i / max(1, n - 1); e = u * u * (3 - 2 * u)   # eased
+            z = 1.0 + 0.035 * e; s = (e - 0.5) * 2            # push-in; drift from one side to the other
+            bx = cw / 2 + (xs - W / 2) / z; by = ch / 2 + (ys - H / 2) / z
+            dd = cv2.remap(dm, bx, by, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+            fr = cv2.remap(src, bx + s * amp * dd, by + s * amp * 0.3 * dd, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+            p.stdin.write(fr.tobytes())
         p.stdin.close(); p.wait(timeout=600)
     except Exception:
         p.kill(); raise
@@ -253,7 +264,7 @@ def _img_rung(ctx, img, tag):
 
 def _rung_aiimage(ctx):
     if not ctx["vo"]: return None, None, "no narration for the span"
-    img, site = _gen_image(ctx, ctx["vo"], f"qcfix_{ctx['key']}", _cfg_no_google(ctx["cfg"]))
+    img, site = _gen_image(ctx, ctx["vo"], f"qcfix_{ctx['key']}", dict(ctx["cfg"], imagegen_rotate=False, imagegen_per_beat=1))   # all providers, Gemini too (2026-11-12)
     if not img: return None, None, "no image service produced an image"
     return _img_rung(ctx, img, f"AI image ({site}) -> image-to-video")
 
@@ -313,8 +324,124 @@ def _rung_card(ctx):
     return Path(out), None, "headline card"
 
 
-RUNGS = [("stock", _rung_stock), ("ai_image", _rung_aiimage), ("chatgpt_chain", _rung_chatgpt), ("marble", _rung_marble),
-         ("local_i2v_own_frame", _rung_ownframe), ("static_image", _rung_static), ("card", _rung_card)]
+# ------------------------------------------------------------------ the shared ladder rungs (owner, 2026-11-12: "for the
+# interviews too, I want to keep the same rungs") - the steps explainers and Shorts use, callable for one span here
+def _sec(ctx): return {"id": ctx["key"], "vo": ctx["vo"], "subject": None}
+def _aspect(ctx): return "9:16" if ctx["vert"] else "16:9"
+def _space(ctx, name):
+    sd = ctx["work"] / name; sd.mkdir(parents=True, exist_ok=True)
+    (sd / "space.json").write_text(json.dumps({"orient": "portrait" if ctx["vert"] else "landscape", "w": ctx["W"], "h": ctx["H"]}), encoding="utf-8")
+    return sd
+def _checked(ctx, clip, label):
+    good, why = clip_ok(ctx["cfg"], clip, ctx["work"], label)
+    return (Path(clip), None, label) if good else (None, None, f"{label}: frame check failed ({why})")
+
+
+def _rung_metachain(ctx):
+    """Rung 3a: a frame of the source -> Copilot describes it -> Meta makes an image -> Meta animates that image."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from . import mediaroutes
+    snap = ctx["work"] / "chain_snapshot.jpg"
+    if not snap.exists():
+        try:
+            d = media.dur(ctx["mp4"]); media.ff("-ss", f"{d / 2:.2f}", "-i", ctx["mp4"], "-frames:v", 1, snap, timeout=120)
+        except Exception as e: return None, None, f"no source frame ({str(e)[:60]})"
+    ch = mediaroutes.chain_rung(ctx["cfg"], _space(ctx, "chain"), _sec(ctx), f"{ctx['key']}_chain", ctx["log"], snap, aspect=_aspect(ctx))
+    if ch and ch.get("video"): return _checked(ctx, ch["video"], "Meta chain (Copilot -> Meta image -> Meta video)")
+    if ch and ch.get("image"): return _img_rung(ctx, Path(ch["image"]), "Meta chain image -> image-to-video")
+    return None, None, "Meta chain made nothing"
+
+
+def _rung_blender(ctx):
+    """Rung 3b: a complete Blender scene (Poly Haven assets, Cycles on the GPU)."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from . import mediaroutes
+    clip = mediaroutes.blender_rung(ctx["cfg"], _space(ctx, "blender"), _sec(ctx), f"{ctx['key']}_blender", ctx["log"], aspect=_aspect(ctx))
+    return _checked(ctx, clip, "Blender scene") if clip else (None, None, "no complete Blender scene")
+
+
+def _rung_video(ctx):
+    """Rung 5: Meta video (free), then Google Flow (paid, capped by flow_max_per_video)."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from . import mediaroutes
+    clip, tag, rung = mediaroutes.video_rung(ctx["cfg"], _space(ctx, "video"), _sec(ctx), f"{ctx['key']}_video", ctx["log"], aspect=_aspect(ctx))
+    return _checked(ctx, clip, "Flow video" if rung == "flow" else "Meta video") if clip else (None, None, "no AI video (Meta, Flow)")
+
+
+def _prompt(ctx):
+    try:
+        from .flow import visual_prompt
+        return visual_prompt(ctx["cfg"], _sec(ctx), ctx["log"]) or ctx["vo"]
+    except Exception: return ctx["vo"]
+
+
+def _rung_cloud(ctx):
+    """The cloud still (Gemini / ChatGPT per cloud_providers), animated by the local image-to-video maker."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from . import cloudgen
+    if not ctx["cfg"].get("cloud_on", True) or not cloudgen.providers_of(ctx["cfg"]): return None, None, "cloud stills off"
+    png = ctx["work"] / f"{ctx['key']}_cloud.png"
+    r = cloudgen.generate(ctx["cfg"], _prompt(ctx), png, _aspect(ctx), ctx["log"], f"cloud {ctx['key']}", job=ctx["job"])
+    if not r.get("ok") or not png.exists(): return None, None, f"no cloud still ({str(r.get('why'))[:80]})"
+    return _img_rung(ctx, png, f"cloud still ({r.get('provider')}) -> image-to-video")
+
+
+def _rung_wangp(ctx):
+    """A WanGP still (local GPU; WanGP starts on demand and stops right after - owner: its rung should rarely be hit)."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from .wangp import WanGP
+    from .render import _still
+    png = ctx["work"] / f"{ctx['key']}_wangp.png"
+    try: ok = _still(ctx["cfg"], WanGP(ctx["cfg"]), ctx["log"], _prompt(ctx), png, 4242, lambda: False, f"WanGP {ctx['key']}")
+    except Exception as e: return None, None, f"WanGP unavailable ({str(e)[:80]})"
+    return _img_rung(ctx, png, "WanGP still -> image-to-video") if ok and png.exists() else (None, None, "WanGP made no usable still")
+
+
+def _rung_physics(ctx):
+    """A simulation from real data or the narration's numbers (storm track, flight / depth profile...), drawn by Remotion.
+    A drawing: after every picture rung, with the other drawn graphics."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from . import physics, graphics
+    payload = physics.provide(ctx["cfg"], _sec(ctx), {}, ctx["log"])
+    if not payload: return None, None, "no physical motion to model"
+    clip = graphics.render_payload(ctx["cfg"], _space(ctx, "physics"), payload, ctx["key"], ctx["log"])
+    return _checked(ctx, clip, f"physics simulation ({payload['module']}, {payload['source']})")
+
+
+def _rung_studio3d(ctx):
+    """owner, 2026-11-13: a real 3D model of the thing the line is about, turning in a photo studio (exploded view when the
+    line is about its parts) - after every picture rung, AHEAD of the drawn graphics and the card. A rendered model, not AI."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from . import studio3d
+    clip, how = studio3d.clip(ctx["cfg"], ctx["work"] / "studio3d", ctx["vo"], ctx["key"], ctx["W"], ctx["H"], ctx["need"], ctx["log"],
+                              images=ctx.get("images"), job=ctx.get("job"))
+    return _checked(ctx, clip, how) if clip else (None, None, how)
+
+
+MOTION_TEMPLATES = ("stat", "timeline", "compare", "route", "chart", "list", "place", "figure")
+
+
+def _rung_motion(ctx):
+    """owner, 2026-11-12: a drawn animation as the LAST resort, after every picture rung failed and just before the card - a
+    stat, a route or flight path, a timeline, a comparison, a chart, a list, a place on the map, stick figures making a point -
+    rendered by Remotion (no image credits, no lockouts), in the paper or whiteboard look (motion_look).
+    Only a line a drawing explains better than a picture (quote / abstract text cards are not taken; a line that needs a
+    real place, person or object shown goes on to the picture rungs). Frame-checked like every other candidate."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    from . import graphics
+    sd = ctx["work"] / "motion"; sd.mkdir(parents=True, exist_ok=True)
+    (sd / "space.json").write_text(json.dumps({"orient": "portrait" if ctx["vert"] else "landscape", "w": ctx["W"], "h": ctx["H"]}), encoding="utf-8")
+    g = graphics.make(ctx["cfg"], sd, {"vo": ctx["vo"]}, ctx["key"], ctx["log"], allow=MOTION_TEMPLATES, claude=False)
+    if not g.get("ok"): return None, None, f"no drawing fits ({str(g.get('why'))[:90]})"
+    good, why = clip_ok(ctx["cfg"], g["path"], ctx["work"], "motion")
+    if not good: return None, None, f"motion {g['how']}: frame check failed ({why})"
+    return g["path"], None, f"motion graphics ({g['how']})"
+
+
+RUNGS = [("stock", _rung_stock), ("meta_chain", _rung_metachain), ("ai_image", _rung_aiimage), ("chatgpt_chain", _rung_chatgpt),
+         ("blender", _rung_blender), ("video", _rung_video), ("cloud", _rung_cloud), ("marble", _rung_marble),
+         ("local_i2v_own_frame", _rung_ownframe), ("wangp", _rung_wangp), ("static_image", _rung_static),
+         ("studio3d", _rung_studio3d), ("physics", _rung_physics), ("motion", _rung_motion), ("card", _rung_card)]   # 3D studio, then drawings (physics, motion), then the card (owner, 2026-11-12/13)
 
 
 # ------------------------------------------------------------------ splice
@@ -352,6 +479,9 @@ def mark_timeline(job_dir, vert, a, b, rung, how):
     m = re.search(r"\((\w+)\)", how or "")
     tag = (f"GENERATED · {(m.group(1) if m else 'AI').upper()}" if rung in AI_RUNGS else
            "ILLUSTRATIVE" if rung == "stock" else "")
+    if rung == "studio3d":
+        from . import studio3d
+        tag = studio3d.tag(how)
     n = 0
     for bt in data.get("beats", []):
         s0, d, bgs = float(bt.get("start", 0)), float(bt.get("dur", 0)), bt.get("bgs") or []
@@ -432,7 +562,8 @@ def repair(mp4, cfg, job_dir, log=print, stop=lambda: False, vert=False, narrati
 
 
 def ladder_clip(cfg, text, visual, secs, kind, work, job_dir, src=None, log=print,
-                rungs=("stock", "ai_image", "chatgpt_chain", "marble", "local_i2v_own_frame", "static_image")):
+                rungs=("stock", "meta_chain", "ai_image", "chatgpt_chain", "blender", "video", "cloud", "marble", "local_i2v_own_frame",
+                       "wangp", "static_image", "studio3d", "physics", "motion")):
     """The repair ladder for a picture that isn't replacing a fault (owner, 2026-10-27: an interview fact's outside media goes
     through the rungs as a QC proof of concept). -> (clip, rung) or (None, ""). Each rung once; every candidate frame-checked;
     attempts logged to <work>/ladder.json. The card rung is left out: the interview has its own fallback under a fact."""

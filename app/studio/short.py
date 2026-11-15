@@ -600,7 +600,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
                               "tag": vtag, "rung": "flow" if vrung == "flow" else "meta video"})
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
-        if bd.get("kind") == "map" and len(items) < n:
+        # owner, 2026-11-12: the script's route map is a drawing - in the v2 ladder it waits until every picture rung failed
+        # (_v2_rungs, before the templates); the old ladder keeps it here
+        if bd.get("kind") == "map" and len(items) < n and not v2:
             if map_useful(bd): items.append({"type": "graphic", "g": bd, "rung": "map"})
             else: log(f"  {s['id']}: map skipped: its places are too close together to show on a map (they would sit on one dot)")
         have = len(pick.get(s["id"], []))
@@ -834,9 +836,27 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
     5. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
        the script's map coordinates, or a labelled synthetic path), saved to short/physics/<slot>.json
     6. Remotion graphics: draws that payload as a motion-graphics clip; without a payload, a template / Claude composition
-    7. CapCut (hard failures)   8. parallax   9. headline card
+    7. CapCut (hard failures)   8. headline card   (parallax of an unjudged still runs FIRST: drawings are the last resort)
     Every rung is isolated (_safe): a failure is logged and the next rung runs."""
     from . import graphics, physics, capcut
+    # owner, 2026-11-12: drawn graphics (simulation, templates, Claude compositions) are the LAST resort before the headline
+    # card, after every picture rung - so the parallax of a still the check couldn't judge comes first
+    sw = str(r.get("still_why") or "")
+    if r.get("still") and "unavailable" in sw:   # parallax: a still the check couldn't judge (never one rejected for its content)
+        lay = _safe(log, "parallax", lambda: depth_free(sd / r["still"], sd / "fallback" / f"{sl['key']}_p8"))
+        if lay:
+            chain.append("parallax")
+            return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
+    if cfg.get("studio3d_on", True) and not vb.get("s3"):   # owner, 2026-11-13: a real 3D model in the studio, ahead of the drawings
+        vb["s3"] = True
+        from . import studio3d
+        got = _safe(log, "studio3d", lambda: studio3d.clip(cfg, sd / "studio3d", s.get("vo", ""), sl["key"], 1080, 1920,
+                                                           float(cfg.get("graphics_secs", 8)), log)) or (None, "crashed (see log)")
+        if got[0]:
+            chain.append(got[1])
+            return {"type": "video", "src": _rel_sd(got[0], sd), "secs": round(media.dur(got[0]), 2), "rate": 1.0, "freeze": True,
+                    "tag": studio3d.tag(got[1]), "rung": "studio3d"}
+        why.append(f"studio3d: {got[1]}"); failed.append("studio3d")
     payload = None
     if cfg.get("physics_auto", True) and not vb["p"]:   # 5. physics -> data
         vb["p"] = True
@@ -859,6 +879,9 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
                     "textbg": True, "tag": tag, "rung": "simulation"}
         chain.append("graphics (physics payload, drawn live)")   # pre-render failed: the final render draws the same spec
         return {"type": "graphic", "g": payload["spec"], "tag": tag, "rung": "simulation"}
+    if bd.get("kind") == "map" and map_useful(bd) and not vb.get("map"):   # the script's own route map (a drawing: after the pictures)
+        vb["map"] = True; chain.append("map")
+        return {"type": "graphic", "g": bd, "rung": "map"}
     if not vb["g"]:   # 6. Remotion graphics (template, else Claude-generated)
         vb["g"] = True
         g5 = _safe(log, "graphics", lambda: graphics.make(cfg, sd, s, sl["key"], log)) or {"ok": False, "why": "crashed (see log)", "hard": True, "how": "?"}
@@ -874,12 +897,6 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
                 vb["capcut"] = "pending"; chain.append("capcut (pending: one CapCut session after the render)")
         else: vb["capcut"] = "off"
     # 8-10: the beat's visual for the render (provisional when CapCut is pending)
-    sw = str(r.get("still_why") or "")
-    if r.get("still") and "unavailable" in sw:   # 8. parallax: a still the check couldn't judge (never one rejected for its content)
-        lay = _safe(log, "parallax", lambda: depth_free(sd / r["still"], sd / "fallback" / f"{sl['key']}_p8"))
-        if lay:
-            chain.append("parallax")
-            return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
     chain.append("headline")   # 9. headline card (the illustration rung was removed 2026-10-21)
     return {"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}
 

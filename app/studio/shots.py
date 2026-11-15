@@ -1,4 +1,7 @@
 """Shot framing for the interview edit (owner, 2026-10-24): the guest is the subject, the camera holder is not.
+Owner, 2026-11-09: the camera holder is the creator, a vlogger - his face on the front camera (big, often only a sliver at the
+edge; a giant face means the clip is mirrored) is fine to show, so are people milling about. Only a long unbroken stretch of
+him alone is broken up (VLOG_RUN). Floors, ceilings, blank walls, fingers and sideways shots are still covered.
 
   analyze      once per video, 1 frame a second: faces (OpenCV frontal + profile), and the camera's tilt (dominant straight lines).
                The camera holder filmed himself on the front camera, so HIS face is the big, close one ("self", >= ~6% of the
@@ -22,6 +25,12 @@ EDGE_SELF_AREA = 0.035   # ...or a smaller one cut off at the left/right edge (t
 GUEST_LOW = 0.78     # a guest face centred this low is his head poking up at the bottom edge (a shot of the room, not of him)
 GUEST_MIN_AREA = 0.008
 NEAR = 2              # seconds: a "nobody" second this close to the holder or a ceiling counts as that (missed detections)   # smaller than this is a mirror, a poster, a passer-by far away
+VLOG_RUN = 8.0        # owner, 2026-11-09: "the man is me... leave me in as a vlogger... don't overdo it": the creator alone on
+                      # screen stays as filmed, at most this long in one go; the rest of that stretch gets other pictures
+VLOG_MAX_H = 0.50    # owner, 2026-11-09: "I can be in the picture but not such a giant face of closeup" - his face taller than
+                      # half the frame (or cut off at the bottom: chin, neck) is covered like any bad shot; a framed vlog stays
+LEGACY = [False]      # True while planning with the rules before the close-up rule (interview.shot_plan legacy=True)
+CHIN_RUN = 15         # seconds: a faceless run this short between two of his close-ups (front camera) is his chin / neck
 CEILING_TOP = 0.65    # the top of the picture this flat = a car ceiling / blank wall, not a shot of anything
 DETECTOR = "yunet1"   # bump to re-detect faces in a cached analysis
 MODEL = Path(__file__).resolve().parents[2] / "models" / "face_detection_yunet_2023mar.onnx"
@@ -42,6 +51,37 @@ def is_self(f):
     return a >= SELF_AREA or (a >= EDGE_SELF_AREA and (f[0] - f[2] / 2 < 0.02 or f[0] + f[2] / 2 > 0.98))
 
 
+def too_close(f):
+    """The creator's own face too big to watch: taller than VLOG_MAX_H of the frame, or running off its bottom edge. A sliver
+    of it at the side (under 10% of the width) is still fine."""
+    return not LEGACY[0] and f[2] >= 0.10 and (f[3] > VLOG_MAX_H or f[1] + f[3] / 2 > 1.02)
+
+
+def chin_runs(ks, close, none="none", back=False):
+    """Front camera: a run of `none` seconds (no face found) of at most CHIN_RUN between two seconds whose kind is in `close`
+    (his close-up / a bad frame) is the camera on his chin and neck - the detector only misses the face. -> the kinds, filled."""
+    if back or LEGACY[0]: return ks
+    ks = list(ks); i = 0
+    while i < len(ks):
+        if ks[i] != none: i += 1; continue
+        j = i
+        while j < len(ks) and ks[j] == none: j += 1
+        if 0 < i and j < len(ks) and j - i <= CHIN_RUN and ks[i - 1] in close and ks[j] in close:
+            for u in range(i, j): ks[u] = ks[i - 1]
+        i = j
+    return ks
+
+
+def cap_vlog(plan, t0, t1, other):
+    """Plan pieces: a "vlog" piece (the creator alone on screen) stays as filmed for up to VLOG_RUN seconds (a little more
+    rather than leave a scrap under 3 s); the rest of it becomes `other` (covered by other pictures)."""
+    out = []
+    for a, b, k, g, tl in plan:
+        if k != "vlog" or b - a <= VLOG_RUN + 3.0: out.append((a, b, k, g, tl)); continue
+        out.append((a, a + VLOG_RUN, "vlog", None, tl)); out.append((a + VLOG_RUN, b, other, None, tl))
+    return out
+
+
 def is_guest(f):
     return not is_self(f) and f[2] * f[3] >= GUEST_MIN_AREA
 
@@ -50,9 +90,26 @@ BACK_CAMERA = {"on": False}   # owner, 2026-10-27: a back-camera interview (Nea 
                               # face on screen is the guest; a big close face is the guest's close-up, never the holder
 
 
-def split(faces):
-    """-> (guest faces, holder faces). A close two-shot selfie has two big faces: the biggest is the holder, the other the guest."""
-    if BACK_CAMERA["on"]: return [f for f in faces if f[2] * f[3] >= GUEST_MIN_AREA], []
+def camera(path):
+    """'front' / 'back' from an iPhone clip's lens tag (com.apple.quicktime.camera.lens_model, e.g. "iPhone 16 Pro front camera
+    2.69mm f/1.9"), '' when the file doesn't say. Owner, 2026-11-09: one conversation mixes both - the front camera's clips are
+    saved mirrored (and the big face is the holder), the back camera's are not (every face is the guest)."""
+    import re
+    try:
+        p = Path(path); n = p.stat().st_size
+        with open(p, "rb") as fh:
+            head = fh.read(8_000_000)
+            fh.seek(max(0, n - 8_000_000)); tail = fh.read()
+    except OSError:
+        return ""
+    m = re.search(rb"(front|back)[a-zA-Z ]{0,20}camera", head + tail, re.I)
+    return m.group(1).decode().lower() if m else ""
+
+
+def split(faces, back=None):
+    """-> (guest faces, holder faces). A close two-shot selfie has two big faces: the biggest is the holder, the other the guest.
+    back: this clip was filmed on the back camera (None: the interview-wide setting)."""
+    if BACK_CAMERA["on"] if back is None else back: return [f for f in faces if f[2] * f[3] >= GUEST_MIN_AREA], []
     selfs = [f for f in faces if is_self(f)]
     guests = [f for f in faces if is_guest(f)]
     if not guests and len(selfs) >= 2:
@@ -172,6 +229,149 @@ VIS_VERSION = 4   # bump to re-run the check (4: turns from upright faces only, 
 TURN = {"bottom": 180, "left": 90, "right": 270}   # degrees clockwise that bring the top back up
 
 
+VET = """One frame from a phone video. Reply with JSON only: {"shows": "...", "floor_percent": 0-100, "upright": true|false, "worth_showing": true|false}.
+"shows": 3-8 words: what is in the picture.
+"floor_percent": how much of the picture is floor, carpet or ground right in front of the camera (a phone resting low shows mostly floor).
+"upright": false if the picture is sideways or upside down (the sky, a ceiling or people's heads are not at the top).
+"worth_showing": false if the picture is mostly floor or carpet, a blank wall or a ceiling, a close-up of clothing, a shirt or a
+body, a hand or finger over the lens, or a blur - a picture where the phone was not pointed at anything worth seeing."""
+VET_VERSION = 3
+
+
+TURNS = ("transpose=1", "transpose=2", "hflip,vflip")   # a quarter turn clockwise / anticlockwise, upside down
+
+
+def vet_clip(cfg, f, rot="", log=print, n=4, start=0.0, end=None):
+    """Is your clip worth putting on screen in place of a bad shot? (owner, 2026-11-09: "the same boring floor render",
+    a sideways shirt from a clip of his back.) n frames through it, read by the local vision model: floor / wall / ceiling /
+    clothing / a finger / a blur on more than one frame -> not used. A clip that is only sideways or upside down is turned,
+    not rejected (owner, same evening: "it should be rotated or flipped"): each turn is tried and the one the model reads
+    as upright is returned. Cached for every job beside the media database (clip_vet.json): -> (ok, why, rotation filter)."""
+    f = Path(f)
+    try:
+        from . import media_db
+        cache = media_db.path(cfg).parent / "clip_vet.json"
+    except Exception:
+        cache = None
+    try: memo = json.loads(cache.read_text(encoding="utf-8")) if cache and cache.exists() else {}
+    except (OSError, ValueError): memo = {}
+    st = f.stat()
+    key = f"{f.name}|{st.st_size}|{rot}|{start:.0f}|{end or 0:.0f}|v{VET_VERSION}"
+    if key in memo: return tuple(memo[key])
+    try:
+        from . import footage
+        from .llm import parse_json
+    except Exception:
+        return True, "no vision model", rot
+    d = media.dur(f); b = min(d, end) if end else d
+    tmp = Path(cache.parent if cache else ".") / "_vet.jpg"
+    times = [start + (b - start) * (k + 0.5) / n for k in range(n)]
+
+    def look(r):
+        """-> (frames not worth showing, frames not upright, what was seen)"""
+        junk = tilted = 0; seen = []
+        for t in times:
+            media.ff("-ss", f"{t:.2f}", "-i", f, "-frames:v", 1, "-vf", (r + "," if r else "") + "scale=640:-2", tmp, timeout=120)
+            j = parse_json(footage._vision(dict(cfg, vet_provider="local"), tmp, VET))
+            try: fl = float(j.get("floor_percent") or 0)
+            except (TypeError, ValueError): fl = 0.0
+            bad = not bool(j.get("worth_showing", True)) or fl >= 40   # (the phone set down on the carpet)
+            up = bool(j.get("upright", True))
+            junk += bad; tilted += not up
+            seen.append(("x " if bad else "") + ("(turned) " if not up else "") + str(j.get("shows", ""))[:40])
+        return junk, tilted, seen
+
+    try:
+        junk, tilted, seen = look(rot)
+        use = rot
+        if junk <= 1 and tilted >= 2:   # a good clip held sideways / upside down: find the turn that stands it up
+            for t in TURNS:
+                r = (rot + "," if rot else "") + t
+                j2, t2, s2 = look(r)
+                if j2 <= 1 and t2 <= 1: use, seen = r, s2 + [f"turned: {t}"]; break
+            else: tilted = n   # no turn reads upright: not used
+        ok = junk <= 1 and junk < n / 2 and (use != rot or tilted <= 1)
+    except Exception as e:
+        return True, f"vision check unavailable ({str(e)[:60]})", rot   # (not cached: checked again next time)
+    res = (ok, "; ".join(seen), use)
+    memo[key] = list(res)
+    if cache:
+        try: cache.write_text(json.dumps(memo, indent=1, ensure_ascii=False), encoding="utf-8")
+        except OSError: pass
+    if not ok: log(f"    clip {f.name} not used: {res[1]}")
+    elif use != rot: log(f"    clip {f.name} turned upright ({use})")
+    return res
+
+
+UPRIGHT = """One frame from a phone video. Reply with JSON only: {"upright": true|false, "worth_showing": true|false}.
+"upright": false if the picture is sideways or upside down: the sky, a ceiling, shelves, a door's hinges or people's heads are not
+where they would be in a level photo.
+"worth_showing": false if it is mostly a shirt, a chest, a neck or a body filling the frame, a hand or finger over the lens, the
+floor, a blank wall or ceiling, or a blur - the phone not pointed at anything worth seeing."""
+ROT_OF = {"transpose=1": 90, "transpose=2": 270, "hflip,vflip": 180}
+
+
+def look(cfg, src, t, flip=False, log=print):
+    """(degrees clockwise that stand this moment up, worth showing?) - owner, 2026-11-09: a shirt-and-pen close-up of his chest
+    stayed as filmed (no face, so nothing flagged it). Cached beside the media database."""
+    try:
+        from . import media_db, footage
+        from .llm import parse_json
+        cache = media_db.path(cfg).parent / "clip_vet.json"
+    except Exception:
+        return 0, True
+    try: memo = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
+    except (OSError, ValueError): memo = {}
+    key = f"look|{Path(src).name}|{Path(src).stat().st_size}|{t:.0f}|{bool(flip)}"
+    if key in memo: return tuple(memo[key])
+    tmp = cache.parent / "_up.jpg"
+    try:
+        def ask(f):
+            media.ff("-ss", f"{t:.2f}", "-i", src, "-frames:v", 1, "-vf", ("hflip," if flip else "") + (f + "," if f else "") + "scale=640:-2", tmp, timeout=120)
+            return parse_json(footage._vision(dict(cfg, vet_provider="local"), tmp, UPRIGHT))
+        j = ask(""); rot = 0; worth = bool(j.get("worth_showing", True))
+        if worth and not bool(j.get("upright", True)):
+            rot = next((ROT_OF[f] for f in TURNS if bool(ask(f).get("upright", False))), 0)
+    except Exception:
+        return 0, True
+    memo[key] = [rot, worth]
+    try: cache.write_text(json.dumps(memo, indent=1, ensure_ascii=False), encoding="utf-8")
+    except OSError: pass
+    if rot: log(f"    {Path(src).name} at {t:.0f}s turned upright ({rot} deg)")
+    if not worth: log(f"    {Path(src).name} at {t:.0f}s not worth showing as filmed (shirt / floor / ceiling): covered")
+    return rot, worth
+
+
+def upright_rot(cfg, src, t, flip=False, log=print):
+    """Owner, 2026-11-09 ("this is upside down... missed sideways image, the door hinge is horizontal"): degrees clockwise that
+    stand this moment of his own footage up - 0 when it already is. The frame is read by the local vision model; a turn is
+    used only when the turned frame reads upright. Cached beside the media database."""
+    try:
+        from . import media_db, footage
+        from .llm import parse_json
+        cache = media_db.path(cfg).parent / "clip_vet.json"
+    except Exception:
+        return 0
+    try: memo = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
+    except (OSError, ValueError): memo = {}
+    key = f"up|{Path(src).name}|{Path(src).stat().st_size}|{t:.0f}|{bool(flip)}"
+    if key in memo: return memo[key]
+    tmp = cache.parent / "_up.jpg"; rot = 0
+    try:
+        def up(f):
+            media.ff("-ss", f"{t:.2f}", "-i", src, "-frames:v", 1, "-vf", ("hflip," if flip else "") + (f + "," if f else "") + "scale=640:-2", tmp, timeout=120)
+            return bool(parse_json(footage._vision(dict(cfg, vet_provider="local"), tmp, UPRIGHT)).get("upright", True))
+        if not up(""):
+            rot = next((ROT_OF[f] for f in TURNS if up(f)), 0)
+    except Exception:
+        return 0
+    memo[key] = rot
+    try: cache.write_text(json.dumps(memo, indent=1, ensure_ascii=False), encoding="utf-8")
+    except OSError: pass
+    if rot: log(f"    {Path(src).name} at {t:.0f}s turned upright ({rot} deg)")
+    return rot
+
+
 def _turn_img(cv2, im, rot):
     return im if not rot else cv2.rotate(im, {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}[rot])
 
@@ -261,11 +461,16 @@ def face_turns(an, work, cv2):
 def kind_keep(s):
     """Keep-the-scene mode (owner, 2026-10-25): what to DO with a second of his footage - never what to swap it for.
     turnN = turn N degrees clockwise; blur = finger / shirt / smear or the holder's own big face; guest = frame on him."""
-    small, big = split(s["faces"])
+    small, big = split(s["faces"], s.get("back"))
     if s.get("rot") and not s.get("faces"): return f"turn{s['rot']}"
     if s.get("bad") and not small: return "blur"
+    if not small and (s.get("top", 0) > CEILING_TOP or s.get("plain", 0) > 0.6): return "blur"   # car ceiling / blank wall / floor
+    if small and big and not s.get("back"):   # his giant face beside the guest that no crop leaves out: not a clean moment (Nov 9)
+        g = max(small, key=lambda f: f[2] * f[3]); h = max(big, key=lambda f: f[2] * f[3])
+        if too_close(h) and not holder_out("documentary", list(g) + [h]): return "blur"
     if small: return "guest"
-    if big: return "blur"   # the camera holder's own close-up (his neck, his chin): the scene stays, blurred
+    if big and any(too_close(f) for f in big): return "blur"   # his giant face / chin: covered (owner, 2026-11-09)
+    if big: return "vlog"   # the creator on his front camera, framed: kept as filmed
     return "none"
 
 
@@ -279,10 +484,15 @@ def plan_keep(an, t0, t1, min_len=2.0):
         k = kind_keep(s)
         g = None
         if k == "guest":
-            gs, ss = split(s["faces"]); g = max(gs, key=lambda f: f[2] * f[3])
+            gs, ss = split(s["faces"], s.get("back")); g = max(gs, key=lambda f: f[2] * f[3])
             if ss: g = g + [max(ss, key=lambda f: f[2] * f[3])]   # the holder beside him: framed out where a crop can
         raw.append([max(t0, t), min(t1, t + 1), k, g, s.get("tilt", 0)])
         t += 1
+    if not any(x.get("back") for x in an.get("secs") or []):   # front camera (Nov 9): a "nobody" second beside the holder's
+        ks = [r[2] for r in raw]                                # close-up / a bad frame is the detector missing his chin
+        for i, r in enumerate(raw):
+            if ks[i] == "none" and "blur" in ks[max(0, i - NEAR):i + NEAR + 1]: r[2] = "blur"
+        for r, k in zip(raw, chin_runs([r[2] for r in raw], ("blur",))): r[2] = k
     for i, r in enumerate(raw):   # a lone turn/blur second among plain ones is noise; a "none" between two turns of one kind joins them
         if r[2].startswith("turn"):
             same = sum(1 for q in raw[max(0, i - 3):i + 4] if q[2] == r[2])
@@ -308,18 +518,20 @@ def plan_keep(an, t0, t1, min_len=2.0):
         g = [sum(x[n] for x in gs) / len(gs) for n in range(4)] if gs and k == "guest" else None
         sb = [r[3][4] for r in rs if r[3] and len(r[3]) > 4]
         if g and sb and holder_out("documentary", g + [max(sb, key=lambda f: f[2] * f[3])]): g = g + [max(sb, key=lambda f: f[2] * f[3])]
-        tl = sorted(r[4] for r in rs); tilt = tl[len(tl) // 2] if tl else 0.0
+        elif g and sb and sum(too_close(f) for f in sb) * 2 >= len(rs): k, g = "blur", None   # his giant face beside the guest that
+        tl = sorted(r[4] for r in rs); tilt = tl[len(tl) // 2] if tl else 0.0              # no crop leaves out (Nov 9): covered
         res.append((a, b, k, g, tilt))
     return res
 
 
 def kind_of(s):
-    small, big = split(s["faces"])
+    small, big = split(s["faces"], s.get("back"))
     if s.get("bad") and not small: return "empty"   # the vision check: shirt close-up / finger / sideways / floor
     ceiling = s.get("top", 0) > CEILING_TOP
     if small and min(f[1] for f in small) > GUEST_LOW: return "empty"   # only the top of his head at the bottom: cut away to him elsewhere
     if small and not (ceiling and max(f[1] for f in small) > 0.7): return "guest"   # (the guest's head poking up under a ceiling: no)
-    if big: return "self"
+    if big and any(too_close(f) for f in big): return "self"   # his giant face / chin: covered (owner, 2026-11-09)
+    if big: return "vlog"   # the creator vlogging, framed: kept as filmed (long stretches broken up by cap_vlog)
     if ceiling or s.get("plain", 0) > 0.6: return "empty"   # a car ceiling / blank wall: covered by a cutaway like the holder's face
     return "none"
 
@@ -338,12 +550,14 @@ def plan_shots(an, t0, t1, min_len=2.0):
             elif "empty" in near: k = "empty"
         g = None
         if k == "guest":
-            gs, ss = split(s["faces"])
+            gs, ss = split(s["faces"], s.get("back"))
             g = max(gs, key=lambda f: f[2] * f[3])
             if ss: g = g + [max(ss, key=lambda f: f[2] * f[3])]   # the holder beside him: frame him out
         raw.append([max(t0, t), min(t1, t + 1), k, g, s.get("tilt", 0)])
         t += 1
     if not raw: return [(t0, t1, "none", None, 0.0)]
+    back = any(x.get("back") for x in an.get("secs") or [])
+    for r, k in zip(raw, chin_runs([r[2] for r in raw], ("self", "empty"), back=back)): r[2] = k
     shots = []
     for r in raw:   # merge equal neighbours
         if shots and shots[-1][2] == r[2]:
@@ -363,6 +577,8 @@ def plan_shots(an, t0, t1, min_len=2.0):
         g = [sum(x[n] for x in gs) / len(gs) for n in range(4)] if gs else None
         sb = [r[3][4] for r in rs if r[3] and len(r[3]) > 4]
         if g and sb: g = g + [max(sb, key=lambda f: f[2] * f[3])]
+        if g and sb and not holder_out("documentary", g) and sum(too_close(f) for f in sb) * 2 >= len(rs):
+            k, g = "self", None   # his giant face beside the guest that no crop leaves out (Nov 9): covered
         tl = sorted(r[4] for r in rs); tilt = tl[len(tl) // 2] if tl else 0.0
         res.append((a, b, "guest" if g and k != "self" else k, g, tilt))
     return res
@@ -477,7 +693,7 @@ def cutaway_pool(an, used, min_len=3.0):
     """Stretches of the source where the guest is on screen and the holder isn't (for cutaways), outside the used ranges."""
     runs, cur = [], None
     for s in an.get("secs", []):
-        ok = kind_of(s) == "guest" and not split(s["faces"])[1] and not any(a - 1 <= s["t"] <= b + 1 for a, b in used)
+        ok = kind_of(s) == "guest" and not split(s["faces"], s.get("back"))[1] and not any(a - 1 <= s["t"] <= b + 1 for a, b in used)
         if ok:
             if cur and s["t"] == cur[1]: cur[1] = s["t"] + 1
             else:

@@ -38,3 +38,11 @@ app/studio/routelib/secrets/
 
 # local Python virtual environment (rebuilt by install)
 .venv/
+
+# OpenVoice (your voice, US accent): its own env, a clone of its code, its downloaded converter and voice prints
+app/ovenv/
+app/openvoice_src/
+app/ovmodels/
+
+# server logs
+app/server_*.log

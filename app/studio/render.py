@@ -241,6 +241,16 @@ def _v2_after_wangp(cfg, job, v, vo, log):
     sec = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "visuals": [x for x in [v.get("chart") and {"chart": v["chart"]}] if x]}
     md = job / "motion"; md.mkdir(exist_ok=True)
     sec["subject"] = v.get("subject")
+    if cfg.get("studio3d_on", True):   # owner, 2026-11-13: a real 3D model in the studio, ahead of the drawings
+        from . import studio3d
+        try: clip, how = studio3d.clip(cfg, _ws(job) / "studio3d", vo, "L_" + v["id"], 1920, 1080, float(cfg.get("graphics_secs", 8)), log)
+        except Exception as e:
+            if str(e) == "cancelled": raise
+            clip, how = None, f"crash ({str(e)[:100]})"
+        if clip:
+            shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = studio3d.tag(how); v.pop("g", None)
+            log(f"  {v['id']}: {how}"); return "studio3d"
+        log(f"  {v['id']}: studio3d: {how}")
     verb, amod = physics.action(sec) if cfg.get("physics_auto", True) else ("", None)
     if amod:   # action (2026-10-13): the module that animates it before graphics
         from . import liveries

@@ -6,8 +6,9 @@ import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig, Easing } from "remotion";
 import { C, HEAD, BODY } from "./theme";
 import { MapBackdrop, MapPoint } from "./Backdrops";
+import { Place, Figure } from "./Paper";
 
-export type TplKind = "stat" | "quote" | "timeline" | "compare" | "route" | "chart" | "list" | "abstract";
+export type TplKind = "stat" | "quote" | "timeline" | "compare" | "route" | "chart" | "list" | "abstract" | "place" | "figure";
 export type Tpl = { kind: "tpl"; t: TplKind; d: any };
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
@@ -238,6 +239,8 @@ export const TemplateBackdrop: React.FC<{ g: Tpl; dur: number }> = ({ g, dur }) 
   const d = g.d || {};
   if (g.t === "route") return <Route d={d} dur={dur} />;
   if (g.t === "abstract") return <Abstract d={d} dur={dur} />;
+  if (g.t === "place") return <Place d={d} dur={dur} />;      // motion rung, paper look (Paper.tsx)
+  if (g.t === "figure") return <Figure d={d} dur={dur} />;
   const body = g.t === "stat" ? <Stat d={d} dur={dur} /> : g.t === "quote" ? <Quote d={d} dur={dur} /> : g.t === "timeline" ? <Timeline d={d} dur={dur} />
     : g.t === "compare" ? <Compare d={d} dur={dur} /> : g.t === "chart" ? <Chart d={d} dur={dur} /> : <List d={d} dur={dur} />;
   return <AbsoluteFill style={{ background: BG }}><Texture dur={dur} />{body}</AbsoluteFill>;

@@ -9,6 +9,7 @@ Every item looked at gets a row in media_db with its Google Photos URL. The owne
 Pace: a few searches per video at a human speed; a sign-in or "verify it's you" page stops everything (never typed)."""
 import json
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from . import media_db
 
 PROFILE = "F:/videos/gphotos_profile"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
+LOCK = threading.Lock()   # one browser on the Photos profile at a time (Chrome refuses a second one)
 BLOCK = re.compile(r"(verify it.s you|unusual traffic|captcha|couldn.t sign you in|choose an account)", re.I)
 
 
@@ -71,12 +73,83 @@ def search(page, query, shot=None, scrolls=4):
 COORD = re.compile(r"(-?\d{1,2}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})")
 
 
+def _info(page):
+    """The page text with the info panel open. Photos remembers whether the panel was left open, so "i" can close it as
+    easily as open it (2026-11-09: a fresh upload read back blank): press, check for the Details block, press again if gone."""
+    for _ in range(3):
+        body = page.inner_text("body", timeout=8000) or ""
+        if "\nDetails\n" in body: return body
+        page.keyboard.press("i"); page.wait_for_timeout(2500)
+    return page.inner_text("body", timeout=8000) or ""
+
+
+def harvest(page, query, max_scrolls=80, log=print):
+    """Every item of one search, scrolling until the page stops producing new ones (search() stops after 4 scrolls)."""
+    from urllib.parse import quote
+    page.goto("https://photos.google.com/search/" + quote(query), wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(5000); _guard(page)
+    seen, out, idle = set(), [], 0
+    for _ in range(max_scrolls):
+        new = 0
+        for it in page.evaluate(_LINKS):
+            u = media_db.canon(it["url"].split("?")[0])   # a search lists an item under two links: count it once
+            if u not in seen: seen.add(u); out.append(dict(it, url=u)); new += 1
+        idle = 0 if new else idle + 1
+        if idle >= 2: break
+        page.mouse.wheel(0, 2500); page.wait_for_timeout(1800)
+    return out
+
+
+_LINKS = """() => {
+    const res = [];
+    for (const a of document.querySelectorAll('a[href*="/photo/"]')) {
+        let g = '', el = a;
+        for (let i = 0; i < 12 && el; i++) { el = el.parentElement;
+            const h = el && el.querySelector && el.querySelector('[role="heading"], h2, h3'); if (h && h.innerText) { g = h.innerText; break; } }
+        res.push({url: a.href, label: a.getAttribute('aria-label') || '', group: g});
+    }
+    return res; }"""
+
+
+def upload(page, files, log=print, timeout_s=None):
+    """Put local files into the owner's Google Photos (private, original quality) with Create -> Import photos, then find
+    each one in Recently added by its file name. -> {name: photos_url or ""}. Raises Stop on a sign-in / check page."""
+    files = [Path(f) for f in files]
+    page.goto("https://photos.google.com/", wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(5000); _guard(page)
+    page.get_by_role("button", name="Create and add photos").click(); page.wait_for_timeout(2000)
+    with page.expect_file_chooser(timeout=20000) as fc:
+        page.get_by_role("menuitem", name=re.compile("Import photos")).first.click()
+    fc.value.set_files([str(f) for f in files])
+    mb = sum(f.stat().st_size for f in files) / 1e6
+    allowed = timeout_s or 300 + mb * 1.5   # ~1.5 s a MB on a slow uplink, plus five minutes
+    limit = time.time() + allowed
+    done = False
+    while time.time() < limit:
+        page.wait_for_timeout(5000)
+        body = page.inner_text("body", timeout=8000) or ""
+        if re.search(r"You backed up \d+ items?", body): done = True; break
+        if re.search(r"couldn.t (be )?(upload|back)|Upload failed|not enough storage", body, re.I):
+            raise RuntimeError("Google Photos refused the upload: " + re.search(r"[^\n]*(couldn.t|failed|storage)[^\n]*", body, re.I).group(0)[:120])
+    if not done: raise RuntimeError(f"Google Photos upload did not finish in {allowed:.0f} s")
+    log(f"  Google Photos: backed up {len(files)} file(s), {mb:.0f} MB")
+    page.wait_for_timeout(4000)
+    page.get_by_text("Recently added", exact=True).first.click(); page.wait_for_timeout(5000); _guard(page)
+    recent = [it["url"].split("?")[0] for it in page.evaluate(_LINKS)][:len(files) + 6]
+    want, got = {f.name.lower(): f.name for f in files}, {f.name: "" for f in files}
+    for u in recent:
+        if not want: break
+        d = details(page, u)
+        n = want.pop(d.get("file_name", "").lower(), None)
+        if n: got[n] = media_db.canon(d["url"])
+    return got
+
+
 def details(page, url, shot=None):
     """Open one item and read its info panel: date / time, place, file name, size, and the map pin when the page has it."""
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3500); _guard(page)
-    page.keyboard.press("i"); page.wait_for_timeout(2500)   # the info panel
-    body = page.inner_text("body", timeout=8000) or ""
+    body = _info(page)
     i = body.rfind("\nInfo\n")   # the info panel is the last block of the page text
     info = body[i + 6:] if i >= 0 else body[-3000:]
     html = page.content()
@@ -122,7 +195,7 @@ def run(cfg, job, log=print):
     work = Path(job.get("work") or "."); work.mkdir(parents=True, exist_ok=True)
     res = {"search": {}, "details": [], "download": [], "stopped": ""}
     db = media_db.connect(cfg)
-    with sync_playwright() as pw:
+    with LOCK, sync_playwright() as pw:
         ctx, page = _launch(pw, cfg)
         try:
             for k, q in enumerate(job.get("search") or []):

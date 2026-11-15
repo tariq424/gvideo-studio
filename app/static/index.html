@@ -23,6 +23,12 @@ pre{background:var(--inset);border:1px solid var(--line);border-radius:8px;paddi
 .sc button.on{background:var(--acc);color:#111;border-color:var(--acc)}.sc{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:8px 0}.sc-strip{position:relative;height:22px;margin-top:4px}
 .sc-seg{position:absolute;top:0;height:20px;box-sizing:border-box;border:1px solid var(--line);border-radius:4px;font-size:11px;line-height:18px;text-align:center;overflow:hidden;cursor:pointer;background:rgba(127,127,127,.12)}
 .sc-seg.off{opacity:.45;cursor:default}.sc-seg.cur{background:var(--acc);color:#111;font-weight:700}
+.sc-marks{position:relative;height:8px;margin-top:2px}.sc-mk{position:absolute;top:0;height:7px;border-radius:2px;cursor:pointer;min-width:2px}
+.mk-ai{background:#e8912d}.mk-stock{background:#3b82f6}.mk-photo{background:#10b981}.mk-card{background:#9ca3af}.mk-blur{background:#a78bfa}.mk-trip{background:#14b8a6}
+.sc-bns{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}.sc-bn{padding:2px 6px;font-size:12px;min-width:28px;line-height:16px}
+.sc-bn.cur{background:var(--acc);color:#111;border-color:var(--acc);font-weight:700}.sc-bn.off{opacity:.5}.sc-bn .mk-dot{width:6px;height:6px;margin:0 0 0 2px}
+.sc-key{font-size:11.5px;margin-top:3px}.sc-key span{display:inline-block;width:10px;height:7px;border-radius:2px;margin:0 3px 0 8px}
+.mk-dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 4px 0 2px;vertical-align:middle}
 .sec-edit{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.sec-edit input{font-weight:600}
 video{width:100%;border-radius:8px;margin-top:10px}
 details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:10px}
@@ -114,6 +120,7 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp){display:none}
    <label>End-card thanks (optional; default "Thank you, &lt;guest&gt;")</label><input id="ivt" data-testid="interview-thanks" type="text"></details>
    <label>Longer cut length (minutes; researched segments fill it out)</label><input id="ivm" data-testid="interview-minutes" type="number" min="0" max="30" value="15">
    <label style="display:flex;gap:6px;align-items:center"><input id="ivb" data-testid="interview-back-camera" type="checkbox" checked style="width:auto"> I filmed the guest (back camera) - never blur their face</label>
+   <label style="display:flex;gap:6px;align-items:center" title="Narration, fact lines and your on-camera commentary are read in your voice with a US accent (OpenVoice over Kokoro; the Kokoro US voice until OpenVoice is set up). On camera it is a voiceover: your camera audio is dropped, no lip-sync, captions carry it."><input id="ivv" data-testid="interview-my-voice" type="checkbox" style="width:auto"> Use my US voice for narration and on-camera commentary</label>
    <div class="mut" style="font-size:12.5px">Makes a Short and a longer cut: a preview of the best moments, background on who and where, then your questions and the answers in order, with commentary where the guest gets specific.</div></div>
   <div id="s_meta" style="display:none"><label>Title of the source (shown in credits)</label><input id="stt" data-testid="source-title" aria-label="Source title" type="text" placeholder="e.g. The economics of AI agents">
    <label>Credit (who made it)</label><input id="scr" data-testid="source-credit" aria-label="Source credit" type="text" placeholder="e.g. NotebookLM, or the author's name"></div>
@@ -170,7 +177,7 @@ function runUI(js){const r=(js||[]).find(x=>BUSY.includes(x.status));RUNJOB=r?r.
 async function stopVideo(){if(!RUNJOB)return;$('stopbtn').disabled=true;try{const d=await j(`/api/jobs/${RUNJOB}/stop`,{method:'POST'});$('cmsg').textContent=d.state=='stopping'?'Stopping at the next safe point (never mid-render)…':'Stopped.'}catch(e){$('cmsg').textContent=e.message}$('stopbtn').disabled=false;loadJobs()}
 async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn').disabled=true;$('cmsg').textContent='Starting...';const k=$('srck').value;const fd=new FormData();
  if(k=='interview'){if(!$('ivp').value.trim()){$('cmsg').textContent='Type the path of the interview video first.';STARTING=false;$('makebtn').disabled=false;return}
-  for(const [a,v] of [['mode','interview'],['src_path',$('ivp').value.trim()],['interview_context',$('ivc').value],['interview_extras',$('ivx').value],['interview_thanks',$('ivt').value],['interview_minutes',$('ivm').value],['interview_back_camera',$('ivb').checked?'1':'0']])fd.append(a,v);
+  for(const [a,v] of [['mode','interview'],['src_path',$('ivp').value.trim()],['interview_context',$('ivc').value],['interview_extras',$('ivx').value],['interview_thanks',$('ivt').value],['interview_minutes',$('ivm').value],['interview_back_camera',$('ivb').checked?'1':'0'],['interview_my_voice',$('ivv').checked?'1':'0']])fd.append(a,v);
   try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;$('ivp').value='';$('ivc').value='';$('ivx').value='';$('ivt').value='';$('cmsg').textContent='';STARTING=false;loadJobs()}catch(e){$('cmsg').textContent=e.message;STARTING=false;$('makebtn').disabled=false}
   return}
  const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,tts_engine:$('ttse').value,audience:$('aud').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
@@ -423,6 +430,10 @@ function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?ed
  else if(b)h+=`<span class="mut" style="font-size:13px">${esc(b.label)}: not editable (title/end card)</span>`;
  else h+=`<span class="mut" style="font-size:13px">Play or scrub to a beat to edit it</span>`;
  if(!d.busy&&ED.beats.some(x=>x.editable))h+=`<select data-testid="edit-jump" aria-label="Jump to beat" style="width:auto" onchange="edJump(this.value)"><option value="">Jump to beat…</option>${ED.beats.filter(x=>x.editable).map(x=>`<option value="${x.id}" ${b&&b.id==x.id?'selected':''}>${esc(x.label)}${ED.kind!='short'?' · '+x.id:''} (${fmtT(x.start)})${x.own?' · your footage':''}</option>`).join('')}</select>`;
+ if(b&&b.fade!==undefined&&!d.busy){const fl='style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:13px"',fi='style="width:auto;margin:0"';   // interview videos (owner, 2026-11-09)
+  h+=`<button class="sec" data-testid="edit-comment" onclick="edCommentUI('${b.id}')" title="Record yourself with the camera, or add a video file, as a new piece here">＋ My commentary here</button><label ${fl}><input type="checkbox" ${fi} data-testid="edit-fade-in" ${b.fade.in?'checked':''} onchange="edFade('${b.id}','in',this.checked)"> Fade in</label><label ${fl}><input type="checkbox" ${fi} data-testid="edit-fade-out" ${b.fade.out?'checked':''} onchange="edFade('${b.id}','out',this.checked)"> Fade out</label>`;
+  if(b.voice&&b.voice.camera){const VL={off:'off camera',on_silent:'on camera, silent',on_speaking:'on camera, speaking'};
+   h+=`<label ${fl} title="Your words read in your US voice over this picture; your camera audio is dropped (no lip-sync; captions carry it)"><input type="checkbox" ${fi} data-testid="edit-my-voice" ${b.voice.synthetic?'checked':''} ${b.voice.label=='on_silent'?'disabled':''} onchange="edVoice('${b.id}',this.checked)"> My US voice (drop camera audio)</label><span class="mut" data-testid="edit-voice-label" style="font-size:12px">${esc(VL[b.voice.label]||b.voice.label||'')}</span>`}}
  if(d.undo&&!d.busy){const hs=d.history||[];const last=hs.length?hs[hs.length-1]:null;h+=`<button class="sec" data-testid="edit-undo" title="${hs.length?esc(hs.length+' edit(s) can be undone, newest first'):''}" onclick="edAll('undo')">Undo ${last?esc(last.label||last.beat):'last edit'}${hs.length>1?' ('+hs.length+')':''}</button>`}
  if(!d.busy&&(d.outputs||[]).length>1)h+=`<span class="mut" style="font-size:13px">Editing:</span><button class="sec ${d.target=='short'?'on':''}" data-testid="edit-target-short" onclick="edTarget('short')">Short</button><button class="sec ${d.target!='short'?'on':''}" data-testid="edit-target-long" onclick="edTarget('long')">Explainer</button>`;
  h+=`<button class="sec" onclick="if(confirm('Re-render the whole video? Your edits are kept.'))edAll('rerender')">Full re-render</button><button class="sec" onclick="edAll('cleanup')" title="Deletes previews and unused treatment files; thumbnails stay">Done editing (clean up)</button>`;
@@ -430,6 +441,7 @@ function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?ed
  const L=d.last;if(L&&!d.busy)h+=`<span class="ed-last" data-testid="edit-last-status" style="color:var(${L.ok?'--ok':'--bad'})">Last edit (${esc(L.beat)}): ${L.ok?'applied':'NOT applied — '+esc(L.msg)}</span>`;
  else if(d.error&&!d.busy)h+=`<span style="color:var(--bad);font-size:13px">Last edit NOT applied: ${esc(d.error)}</span>`;
  if(d.edits&&d.edits.length)h+=`<span class="mut" style="font-size:12px">${d.edits.length} edit(s) in the video</span>`;
+ if(!d.busy&&ED.beats.length)h+=`<button class="sec" data-testid="defects-open" onclick="dfUI()" title="Load a Vision Checker defect report: only the flagged stretches are re-made">Defect report…</button>`;
  el.innerHTML=h+`</div>`}
 // ---------------- timeline scrubber: find a beat by scrubbing the video, then open it in the edit panel below
 // Short / Explainer selector (edit/target), player scrubber with the beat strip, timestamp, beat at that time, Play / Stop,
@@ -444,24 +456,45 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <button class="sec ${tgt!='short'?'on':''}" data-testid="scrub-pick-long" aria-pressed="${tgt!='short'}" ${has('long')&&!d.busy?'':'disabled'} onclick="${tgt!='short'?'':"edTarget('long')"}">Explainer</button></div>`;
  h+=`<div id="scr_vo" data-testid="scrub-vo" class="scr-vo" hidden></div>`;
  h+=`<input type="range" id="scr_r" data-testid="scrub-range" aria-label="Scrub the video" min="0" max="${D.toFixed(2)}" step="0.05" value="${(v.currentTime||0).toFixed(2)}" oninput="scSeek(this.value)" style="width:100%;margin:0">`;
- if(D>0&&ED.beats.length)h+=`<div class="sc-strip">${ED.beats.map(b=>`<div class="sc-seg ${b.editable?'':'off'}" data-beat="${b.id}" title="${esc(b.label)} (${fmtT(b.start)})${(b.rungs||[]).length?' — '+esc(b.rungs.join(', ')):''}" style="left:${(b.start/D*100).toFixed(3)}%;width:${(b.dur/D*100).toFixed(3)}%" onclick="scSeek(${(b.start+Math.min(0.5,b.dur/2)).toFixed(2)})">${ED.kind=='short'?(b.label||'').replace(/^Beat /,''):b.id}</div>`).join('')}</div>`;
+ if(D>0&&ED.beats.length){const W=(el.clientWidth||900)-24;   // owner, Nov 10: beat numbers you can read and click; each stretch's rung marked under them
+  h+=`<div class="sc-strip">${ED.beats.map(b=>{const px=b.dur/D*W,lab=ED.kind=='short'?(b.label||'').replace(/^Beat /,''):String(b.n||b.id);
+   return`<div class="sc-seg ${b.editable?'':'off'}" data-beat="${b.id}" data-testid="scrub-beat-btn" title="Beat ${b.n||''} · ${esc(b.label)} · ${b.id} (${fmtT(b.start)})${(b.stretches||[]).length?' — '+esc(b.stretches.map(stName).join(', ')):''}" style="left:${(b.start/D*100).toFixed(3)}%;width:${(b.dur/D*100).toFixed(3)}%" onclick="scSeek(${(b.start+Math.min(0.5,b.dur/2)).toFixed(2)})">${px>=8*lab.length+4?esc(lab):''}</div>`}).join('')}</div>`;
+  h+=`<div class="sc-marks" data-testid="scrub-rung-marks">${ED.beats.flatMap(b=>(b.stretches||[]).map(s=>{const k=stKind(s);return k=='own'?'':`<div class="sc-mk mk-${k}" title="${fmtT(b.start+s.a)}–${fmtT(b.start+s.b)} · ${esc(stName(s))}${s.credit&&s.credit!=s.how?' · '+esc(s.credit):''}" style="left:${((b.start+s.a)/D*100).toFixed(3)}%;width:${(Math.max(0.15,(s.b-s.a))/D*100).toFixed(3)}%" onclick="scSeek(${(b.start+s.a+0.05).toFixed(2)})"></div>`})).join('')}</div>
+  <div class="sc-bns" data-testid="scrub-beat-buttons">${ED.beats.map(b=>{const ks=[...new Set((b.stretches||[]).map(stKind).filter(k=>k!='own'))];return`<button class="sec sc-bn ${b.editable?'':'off'}" data-beat="${b.id}" title="${esc(b.label)} · ${b.id} (${fmtT(b.start)})${(b.stretches||[]).length?' — '+esc(b.stretches.map(stName).join(', ')):''}" onclick="scSeek(${(b.start+Math.min(0.5,b.dur/2)).toFixed(2)})">${ED.kind=='short'?esc((b.label||'').replace(/^Beat /,'')):b.n||b.id}${ks.map(k=>`<span class="mk-dot mk-${k}"></span>`).join('')}</button>`}).join('')}</div>
+  <div class="sc-key mut"><span class="mk-ai"></span>AI <span class="mk-stock"></span>stock <span class="mk-photo"></span>photo <span class="mk-card"></span>card <span class="mk-trip"></span>your other clips <span class="mk-blur"></span>blur / held frame · unmarked = your footage as filmed</div>`}
  h+=`<div class="row" style="align-items:center;gap:8px;margin-top:6px">
   <button class="sec" data-testid="scrub-play" onclick="$('ov').play()">▶ Play</button><button class="sec" data-testid="scrub-stop" onclick="$('ov').pause()">■ Stop</button>
   <span data-testid="scrub-time" id="scr_t" style="font-variant-numeric:tabular-nums;font-weight:600">0:00.0</span><span class="mut" style="font-size:13px">/ ${fmtTs(D)}</span>
   <span data-testid="scrub-beat" id="scr_b" class="rv-badge">—</span>
-  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div><div id="scr_rung" data-testid="scrub-rung" class="src-note" style="font-weight:600" hidden></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div></div>`;
+  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div><div id="scr_rung" data-testid="scrub-rung" class="src-note" style="font-weight:600;white-space:pre-line" hidden></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div></div>`;
  el.innerHTML=h;scTick()}
+// ---- how each stretch's picture was made (owner, 2026-11-10: "I don't see the source of the clip, e.g. stock video or the rung")
+const RUNGN={ai_image:'AI image',chatgpt_chain:'ChatGPT image chain',static_image:'still image',card:'headline card',meta_chain:'Meta image → video',flow:'Google Flow video'};
+function stName(s){const h=String(s.how||'');const m=h.match(/^rung (\w+)/);if(/^trip /.test(h))return'your other clips ('+h.slice(5)+')';
+ if(/^photo\b/.test(h))return'real photo (Wikimedia Commons)';if(/^stock\b/.test(h))return'stock video';if(/^own footage/.test(h))return'your footage of this place';return m?`${RUNGN[m[1]]||m[1].replace(/_/g,' ')} rung`:h}
+function stKind(s){const h=(String(s.how||'')+' '+String(s.credit||'')).toLowerCase();
+ if(/card|headline/.test(h))return'card';if(/^trip |own footage/.test(h))return'trip';if(/stock|pexels|pixabay|archive\.org|internet archive/.test(h))return'stock';
+ if(/blur|held|nearest remade/.test(h))return'blur';if(/\bai\b|ai-|rung|sketch|mock-up|chatgpt|generated|parallax/.test(h))return'ai';
+ if(/photo|commons|wikimedia/.test(h))return'photo';return'own'}
+function stMore(s){const pr=String(s.provider||'').toLowerCase(),d=String(s.detail||'');   // which service, how it was animated, the prompt
+ const svc=/cloudflare/i.test(d+pr)?'Cloudflare':/\bflow\b/i.test(d+pr)?'Google Flow':/chatgpt/i.test(d+pr)?'ChatGPT':/\bmeta\b/i.test(d+pr)?'Meta':/\bhf\b|hugging/i.test(d+pr)?'Hugging Face':/bing/i.test(d+pr)?'Bing':/gemini/i.test(d+pr)?'Gemini':'';
+ const mo=/^(photo|sketch|the nearest remade)/.test(String(s.how||''))?'still, slow push-in':/image-to-video|parallax/i.test(d+(s.parallax||''))?('parallax'+(/depth/i.test(s.parallax||'')?' (depth layers, no clear subject)':/cut-out/i.test(s.parallax||'')?' (subject cut out)':'')):'';
+ return[svc&&'service: '+svc,mo&&'motion: '+mo,d&&!svc&&d,s.prompt&&'prompt: “'+s.prompt+'”'].filter(Boolean).join(' · ')}
+function stList(bt){const ss=bt.stretches||[];if(!ss.length)return'';
+ return`<div class="src-note" data-testid="edit-stretches"><b>Pictures in this beat</b><ul style="margin:4px 0 0 18px;padding:0">${ss.map(s=>`<li><a href="#" onclick="scSeek(${((bt.start||0)+s.a+0.05).toFixed(2)});return false">${fmtT((bt.start||0)+s.a)}–${fmtT((bt.start||0)+s.b)}</a> <span class="mk-dot mk-${stKind(s)}"></span>${esc(stName(s))}${s.credit&&s.credit!=s.how?' · '+esc(s.credit):''}${s.fix?' · fixed from the defect report ('+esc(s.fix)+')':''}${stMore(s)?`<br><span class="mut" style="font-size:12px">${esc(stMore(s))}</span>`:''}</li>`).join('')}</ul></div>`}
 function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
 function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.currentTime||0;
  if(document.activeElement!==r)r.value=t.toFixed(2);if(isFinite(v.duration)&&+r.max<v.duration)r.max=v.duration.toFixed(2);
  $('scr_t').textContent=fmtTs(t);const b=edAt(t),busy=(ED.last||{}).busy;
  const vo=$('scr_vo');if(vo){vo.hidden=!b?.vo;if(b?.vo&&vo.dataset.beat!==b.id){vo.dataset.beat=b.id;vo.innerHTML=`<span class="edp-lab">${esc(b.label)} script</span> ${esc(b.vo)}`}}
  const source=$('scr_source');if(source){source.hidden=!b?.source;source.textContent=b?.source?'Picture source: '+b.source:''}
- const rg=$('scr_rung');if(rg){const rs=(b&&b.rungs)||[];rg.hidden=!rs.length;rg.textContent=rs.length?`Made by: ${rs.join(' · ')}`:''}
+ const rg=$('scr_rung');if(rg){const s=b&&(b.stretches||[]).find(x=>t-b.start>=x.a&&t-b.start<x.b);const rs=(b&&b.rungs)||[];
+  const txt=s?`Made by: ${stName(s)}${s.credit&&s.credit!=s.how?' · '+s.credit:''} (${fmtT(b.start+s.a)}–${fmtT(b.start+s.b)})${stMore(s)?'\n'+stMore(s):''}`:b&&b.stretches&&/Soundbite|commentary/.test(b.label)?'Made by: your footage, as filmed':rs.length?`Made by: ${rs.join(' · ')}`:'';
+  rg.hidden=!txt;rg.textContent=txt}
  $('scr_b').textContent=b?(b.label+(ED.kind!='short'?' · '+b.id:'')+(b.editable?'':' (not editable)')):(ED.beats.length?'between beats':'beats not loaded');
  $('scr_b').dataset.beat=b?b.id:'';
  const e=$('scr_e');e.disabled=!(b&&b.editable)||!!busy||!v.paused;e.title=!v.paused?'Stop the video first':busy?String(busy):'';
- document.querySelectorAll('.sc-seg').forEach(x=>x.classList.toggle('cur',!!b&&x.dataset.beat==b.id))}
+ document.querySelectorAll('.sc-seg,.sc-bn').forEach(x=>x.classList.toggle('cur',!!b&&x.dataset.beat==b.id))}
 function scEdit(){const v=$('ov');if(!v)return;v.pause();const b=edAt(v.currentTime);if(b&&b.editable)edOpen(b.id)}
 
 async function edTarget(t){try{await rvPost(`/api/jobs/${sel}/edit/target`,{target:t});ED.open=null;lastKey='';loadJobs()}catch(e){alert(e.message)}}
@@ -482,7 +515,7 @@ const edUserSel=()=>ED.sel.length&&ED.sel.every(c=>{const x=ED.rv.cands[c];retur
 function edPane(cls,title,sub,body,tid){return`<section class="edp ${cls}" data-testid="edit-pane-${tid}"><h3 class="edp-t">${title}${sub?` <span class="edp-sub">${sub}</span>`:''}</h3>${body}</section>`}
 function edDraw(){if($('edchat'))ED.draft=$('edchat').value;const pv=$('edpv'),pvKeep=pv&&!pv.querySelector('.edp-empty')&&pv.innerHTML.trim()?pv.innerHTML:'';const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id==bid)||{};
  const head=`<div class="edp-head"><div><h2 style="margin:0">Edit ${esc(bt.label||bid)}</h2><div class="edp-meta">${fmtT(bt.start||0)}–${fmtT((bt.start||0)+(bt.dur||0))} · ${(bt.dur||0).toFixed(1)}s slot${ED.kind!='short'?' · '+esc(bid):''}</div></div><span style="flex:1"></span><button class="sec" onclick="ED.open=null;$('edp').innerHTML=''">Close</button></div>
- <div class="edp-vo"><span class="edp-lab">Narration</span>${esc(b.vo)}</div>${bt.source?`<div class="src-note">Picture source: ${esc(bt.source)}</div>`:``}`;
+ <div class="edp-vo"><span class="edp-lab">Narration</span>${esc(b.vo)}</div>${bt.source?`<div class="src-note">Picture source: ${esc(bt.source)}</div>`:``}${stList(bt)}`;
  // Candidates
  let cands=`<div class="edp-help">Tick <b>Use</b> on the ones to show (they play in the order ticked). Click a thumbnail to preview it on the right. Blue outline = in the video now.</div><div class="rv-row">`;
  for(const cid of b.cands){const c=ED.rv.cands[cid];if(c.missing)continue;const i=ED.sel.indexOf(cid);const [src,srcT]=SRC_OF(c);
@@ -545,6 +578,52 @@ async function edRv(a,extra){const body=Object.assign({action:a},extra||{});if(a
  try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,body);edDraw();setTimeout(edRefresh,1500)}catch(e){alert(e.message)}}
 async function edSupply(){const t=$('edsp').value.trim();if(!t)return;$('edmsg').textContent='Adding your file…';
  try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,{action:'supply',src:t,tag:$('edst').value});ED.sel=[...ED.rv.beats[ED.open].chosen];$('edmsg').textContent='';edDraw()}catch(e){$('edmsg').textContent='';alert(e.message)}}
+// ---- defect report from the Vision Checker (owner, 2026-11-10): only the flagged stretches are re-made, then the video re-assembled
+const DFT={wrong_concept:'wrong concept → a new picture idea (any rung, AI included)',bad_framing:'bad framing → a wider shot (real or AI)',artifact:'artifact → same idea, prompt fixed'};
+function dfUI(){edRecStop(true);
+ $('edp').innerHTML=`<div class="card edp-card" style="margin-top:12px" data-testid="defects-panel"><div class="edp-head"><h2 style="margin:0">Defect report</h2><span style="flex:1"></span><button class="sec" onclick="$('edp').innerHTML=''">Close</button></div>
+ <div class="edp-help">From the Vision Checker. Only the stretches it flags are re-made: <b>wrong_concept</b> gets a new picture idea, <b>bad_framing</b> a wider shot, <b>artifact</b> the same idea with the prompt fixed. AI pictures stay unless the report flags them. Everything else in the video is kept as it is.</div>
+ <div id="dfdrop" data-testid="defects-drop" style="border:2px dashed var(--line,#999);border-radius:8px;padding:14px;text-align:center;margin:8px 0" ondragover="event.preventDefault();this.style.background='rgba(127,127,127,.12)'" ondragleave="this.style.background=''" ondrop="dfDrop(event)">Drop a report .json here, or <input type="file" id="dffile" data-testid="defects-file" accept=".json,application/json,text/plain" style="width:auto" onchange="dfRead(this.files[0])"></div>
+ <label>…or its path on this PC</label><div class="row"><input type="text" id="dfpath" data-testid="defects-path" style="flex:1" placeholder="F:\\videos_test\\jobs\\…\\defects.json"></div>
+ <label>…or paste it</label><textarea id="dftext" data-testid="defects-text" rows="7" style="width:100%;font-family:monospace;font-size:12px" placeholder='{"mismatches": [{"start": "26:52", "end": "27:04", "defect_type": "wrong_concept", "note": "…"}]}'></textarea>
+ <div class="row"><button class="sec" data-testid="defects-check" onclick="dfGo(true)">Check report</button><button data-testid="defects-run" id="dfrun" onclick="dfGo(false)" disabled>Fix these stretches</button></div>
+ <div id="dfmsg" data-testid="defects-msg" class="mut"></div><div id="dfplan" data-testid="defects-plan"></div></div>`}
+function dfRead(f){if(!f)return;const r=new FileReader();r.onload=()=>{$('dftext').value=r.result;$('dfpath').value='';dfGo(true)};r.readAsText(f)}
+function dfDrop(e){e.preventDefault();$('dfdrop').style.background='';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)return dfRead(f);const t=e.dataTransfer.getData('text');if(t){$('dftext').value=t;dfGo(true)}}
+function dfBody(){const t=$('dftext').value.trim(),p=$('dfpath').value.trim();return t?{report:t}:{path:p}}
+async function dfGo(check){$('dfmsg').textContent=check?'Reading the report…':'Starting…';
+ try{if(check){const r=await edPost(`/api/jobs/${sel}/edit_all/defects`,Object.assign(dfBody(),{plan_only:true}));const pl=r.plan||[];
+   $('dfplan').innerHTML=`<table style="width:100%;font-size:13px;border-collapse:collapse"><tr><th align="left">#</th><th align="left">Where</th><th align="left">Piece</th><th align="left">Fix</th><th align="left">Note</th></tr>${pl.map(x=>`<tr data-testid="defects-row" style="${x.skip?'opacity:.55':''}"><td>${x.n}</td><td><a href="#" onclick="const v=$('ov');if(v){v.currentTime=${x.start};v.pause()};return false">${fmtT(x.start)}–${fmtT(x.end)}</a></td><td>${esc(x.bid?x.bid+' · '+x.label:'')}</td><td>${x.skip?'skipped: '+esc(x.skip):esc(DFT[x.type]||x.type)}</td><td>${esc(x.note)}</td></tr>`).join('')}</table>`;
+   const n=pl.filter(x=>!x.skip).length;$('dfrun').disabled=!n;$('dfmsg').textContent=n?`${n} stretch(es) to re-make. Each takes about 1–3 min, then one re-assembly (only changed pieces re-encoded).`:'Nothing in the report can be re-made.';return}
+  edRelease();await edPost(`/api/jobs/${sel}/edit_all/defects`,dfBody());$('edp').innerHTML='';edWait()}
+ catch(e){$('dfmsg').textContent='';if(!check)edReload();alert(e.message)}}
+// ---- your own commentary (camera or file) as a new piece, and fades (interview videos; owner, 2026-11-09)
+function edCommentUI(bid){const b=ED.beats.find(x=>x.id==bid)||{};edRecStop(true);ED.rec={bid};
+ $('edp').innerHTML=`<div class="card edp-card" style="margin-top:12px" data-testid="comment-panel"><div class="edp-head"><h2 style="margin:0">Your commentary</h2><span style="flex:1"></span><button class="sec" onclick="edRecStop(true);$('edp').innerHTML=''">Close</button></div>
+ <div class="edp-help">A new piece next to <b>${esc(b.label||bid)}</b> (${fmtT(b.start||0)}–${fmtT((b.start||0)+(b.dur||0))}). Record yourself with this PC's camera, or use a video file. Captions are made from what you say.</div>
+ <video id="recv" data-testid="comment-video" autoplay muted playsinline style="max-height:360px;max-width:100%;background:#000" hidden></video>
+ <div class="row"><button id="recgo" data-testid="comment-record" onclick="edRecStart()">● Record with camera</button><button class="sec" id="recstop" data-testid="comment-stop" onclick="edRecStop()" disabled>■ Stop</button><span id="rect" class="mut"></span></div>
+ <label>…or a video file (path on this PC, or pick one)</label><div class="row"><input type="text" id="recpath" data-testid="comment-path" style="flex:1" placeholder="F:\\bermuda\\my-take.mov"><input type="file" id="recfile" accept="video/*" style="width:auto"></div>
+ <div class="row"><select id="recwhere" data-testid="comment-where" style="width:auto"><option value="after">after this piece</option><option value="before">before this piece</option></select><label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:13px" title="Your words read in your US voice; your camera audio is dropped (no lip-sync; captions carry it)"><input type="checkbox" id="recsyn" data-testid="comment-my-voice" style="width:auto;margin:0" ${(ED.last||{}).my_voice?'checked':''}> Use my US voice (drop camera audio)</label><button id="recins" data-testid="comment-insert" onclick="edInsert()">Insert into the video</button></div><div id="recmsg" data-testid="comment-msg" class="mut"></div></div>`}
+async function edRecStart(){const R=ED.rec;try{const st=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080}},audio:true});R.stream=st;R.blob=null;
+  const v=$('recv');v.hidden=false;v.controls=false;v.muted=true;v.removeAttribute('src');v.srcObject=st;v.style.transform='scaleX(-1)';   // a mirror to look at; the recording itself is not mirrored
+  const mt=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t));
+  const r=new MediaRecorder(st,mt?{mimeType:mt}:{});R.chunks=[];r.ondataavailable=e=>{if(e.data.size)R.chunks.push(e.data)};
+  r.onstop=()=>{R.blob=new Blob(R.chunks,{type:'video/webm'});const v=$('recv');if(v){v.srcObject=null;v.style.transform='';v.muted=false;v.controls=true;v.src=URL.createObjectURL(R.blob)}
+   if($('rect'))$('rect').textContent=`Recorded ${Math.round((Date.now()-R.t0)/1000)} s — play it back, then Insert`};
+  r.start(1000);R.r=r;R.t0=Date.now();$('recgo').disabled=true;$('recstop').disabled=false;R.tick=setInterval(()=>{if($('rect'))$('rect').textContent=`Recording… ${Math.round((Date.now()-R.t0)/1000)} s`},500)}
+ catch(e){$('recmsg').textContent='Camera not available: '+e.message}}
+function edRecStop(close){const R=ED.rec||{};clearInterval(R.tick);if(R.r&&R.r.state!='inactive')R.r.stop();if(R.stream)R.stream.getTracks().forEach(t=>t.stop());R.stream=null;
+ if(!close&&$('recgo')){$('recgo').disabled=false;$('recgo').textContent='● Record again';$('recstop').disabled=true}}
+async function edInsert(){const R=ED.rec||{};let src=$('recpath').value.trim();const fl=$('recfile').files[0];
+ try{if(!src&&(fl||R.blob)){$('recmsg').textContent='Uploading…';const fd=new FormData();fd.append('file',fl||R.blob,fl?fl.name:'commentary.webm');
+   const r=await fetch(`/api/jobs/${sel}/edit/upload`,{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||r.statusText);src=d.path}
+  if(!src)throw new Error('Record something or give a video file first');
+  $('recmsg').textContent='Adding it to the video…';edRelease();await edPost(`/api/jobs/${sel}/edit/insert/${R.bid}`,{src,where:$('recwhere').value,synthetic:$('recsyn').checked});edRecStop(true);$('edp').innerHTML='';edWait()}
+ catch(e){$('recmsg').textContent=e.message}}
+async function edVoice(bid,on){edRelease();try{await edPost(`/api/jobs/${sel}/edit/voice/${bid}`,{on});edWait()}catch(e){edReload();alert(e.message)}}
+async function edFade(bid,which,on){const b=ED.beats.find(x=>x.id==bid)||{};const f=Object.assign({in:false,out:false},b.fade||{});f[which]=on;edRelease();
+ try{await edPost(`/api/jobs/${sel}/edit/fade/${bid}`,f);edWait()}catch(e){edReload();alert(e.message)}}
 
 // ---- debugger: the shared pause panel (manual pause, breakpoint, or the auto review pause with debug on)
 let D=null,DBG_PAUSED=false,dbgBeat=null,dbgBusy='',dbgKey='';

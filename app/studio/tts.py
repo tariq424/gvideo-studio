@@ -140,3 +140,69 @@ def kokoro_batch(cfg, items, log, tag="voice", stop=lambda: False):
         raw.unlink(missing_ok=True)
     secs = sum(media.dur(o) for _, o in todo)
     log(f"  {tag}: Kokoro ({voice}) rendered {secs:.0f}s of narration in {time.time() - t0:.0f}s ({len(todo)} part(s))")
+
+
+# ---------------------------------------------------------------- the owner's own voice with a US accent (owner, 2026-11-09)
+# "my voice" = Kokoro reads the text in a US voice (my_voice_kokoro), then OpenVoice turns that voice's timbre into the owner's
+# (tone-colour conversion from a 30-60 s clean sample, my_voice_ref). Until OpenVoice is installed - its own env, like Kokoro's
+# kenv - the Kokoro US voice reads it unchanged. Config:
+#   my_voice_ref       a clean recording of the owner speaking (wav / mp4 / mov), 30-60 s
+#   my_voice_kokoro    the Kokoro voice under the conversion (default am_michael)
+#   openvoice_python   the OpenVoice env's python ("" = app/ovenv/Scripts/python.exe on Windows, app/ovenv/bin/python elsewhere)
+# The worker (app/openvoice_worker.py) takes a JSON file {"ref", "device", "items": [{"src", "out"}]} and writes each out wav.
+OPENVOICE_WORKER = APP / "openvoice_worker.py"
+
+
+def openvoice_python(cfg):
+    p = cfg.get("openvoice_python") or ""
+    if p: return Path(p)
+    return APP / "ovenv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def openvoice_ready(cfg):
+    """"" when the owner's voice can be made; else why not (shown in the log)."""
+    ref = str(cfg.get("my_voice_ref") or "")
+    if not ref: return "no sample of your voice set (my_voice_ref)"
+    if not Path(ref).is_file(): return f"your voice sample is missing ({ref})"
+    if not OPENVOICE_WORKER.exists() or not openvoice_python(cfg).exists(): return "OpenVoice is not installed"
+    return ""
+
+
+def my_voice_id(cfg):
+    """What reads the owner's lines right now - stamped next to cached narration so a change re-voices it."""
+    kv = cfg.get("my_voice_kokoro") or DEFAULT_VOICE
+    if openvoice_ready(cfg): return f"kokoro:{kv}"
+    return f"openvoice:{kv}:{Path(str(cfg['my_voice_ref'])).name}:{int(Path(str(cfg['my_voice_ref'])).stat().st_mtime)}"
+
+
+def my_voice(cfg, items, log, tag="your voice", stop=lambda: False):
+    """items: [(text, out_wav)] read in the owner's voice with a US accent (48 kHz stereo, like kokoro_batch)."""
+    todo = [(t, Path(o)) for t, o in items if not media.ok(o)]
+    if not todo: return
+    kcfg = dict(cfg, kokoro_voice=cfg.get("my_voice_kokoro") or DEFAULT_VOICE)
+    why = openvoice_ready(cfg)
+    if why:
+        log(f"  {tag}: {why}; the Kokoro US voice ({kcfg['kokoro_voice']}) reads it")
+        kokoro_batch(kcfg, todo, log, tag, stop); return
+    base = [(t, o.with_suffix(".base.wav")) for t, o in todo]
+    kokoro_batch(kcfg, base, log, tag, stop)
+    req = {"ref": str(cfg["my_voice_ref"]), "device": cfg.get("openvoice_device", ""), "tau": float(cfg.get("openvoice_tau", 0.3)),
+           "items": [{"src": str(b), "out": str(o.with_suffix(".ov.wav"))} for (_, b), (_, o) in zip(base, todo)]}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+        json.dump(req, f); jf = f.name
+    t0 = time.time()
+    try:
+        r = subprocess.run([str(openvoice_python(cfg)), str(OPENVOICE_WORKER), jf], capture_output=True, text=True, timeout=1800,
+                           encoding="utf-8", errors="replace")
+    finally:
+        try: os.unlink(jf)
+        except OSError: pass
+    if r.returncode != 0:   # never fail a job over the voice: the Kokoro US voice is still a US voice
+        log(f"  {tag}: OpenVoice failed ({(r.stderr or r.stdout).strip()[-200:]}); the Kokoro US voice reads it")
+        for (_, b), (_, o) in zip(base, todo): media.ff("-i", b, "-ar", 48000, "-ac", 2, o); b.unlink(missing_ok=True)
+        return
+    for (_, b), (_, o) in zip(base, todo):
+        ov = o.with_suffix(".ov.wav")
+        media.ff("-i", ov if media.ok(ov, 0.2) else b, "-ar", 48000, "-ac", 2, o)
+        ov.unlink(missing_ok=True); b.unlink(missing_ok=True)
+    log(f"  {tag}: your voice (OpenVoice) on {len(todo)} part(s) in {time.time() - t0:.0f}s")
