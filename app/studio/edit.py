@@ -300,7 +300,7 @@ def explainer_layout(job):
     """Visual slots of a Remotion explainer: [{id, sid, si, vi, start, dur, label, vo, editable, visual, beat}] (seconds of the output)."""
     from .pipeline import Job
     tz = _tl_json(job, "explainer"); plan = Job(job).plan(); secs = plan["sections"]; out = []
-    beats = [b for b in tz["beats"] if b["id"] != "end"]
+    beats = [b for b in tz["beats"] if b["id"] != "end" and not b.get("insert")]   # your inserts (insert.py) are not sections
     for si, b in enumerate(beats):
         if si >= len(secs): break
         sec = secs[si]; vis = ([{"id": "_title", "type": "chart"}] if si == 0 else []) + list(sec["visuals"])
@@ -460,10 +460,15 @@ def beats(job, want=None):
         plan = Job(job).short_plan() or {"sections": []}
         vo = {s["id"]: s["vo"] for s in plan["sections"]}; cta = {s["id"] for s in plan["sections"] if s.get("cta")}
         secs = {s["id"]: s for s in plan["sections"]}
-        return {"kind": "short", "beats": [{"id": b["id"], "start": b["start"], "dur": b["dur"], "label": f"Beat {i + 1}", "vo": vo.get(b["id"], ""),
-                                             "editable": b["id"] not in cta, "own": any(_is_own(g) for g in b["bgs"]),
+        n = {}; c = 0
+        for b in tz["beats"]:
+            if not b.get("insert"): c += 1; n[b["id"]] = c
+        return {"kind": "short", "beats": [{"id": b["id"], "start": b["start"], "dur": b["dur"], "vo": vo.get(b["id"], ""),
+                                             "label": "Your insert" if b.get("insert") else f"Beat {n[b['id']]}",
+                                             "editable": b["id"] not in cta and not b.get("insert"), "insert": bool(b.get("insert")),
+                                             "own": bool(b.get("insert")) or any(_is_own(g) for g in b["bgs"]),
                                              "source": _bg_source(b["bgs"], secs.get(b["id"])),
-                                             "rungs": _beat_rungs([_bg_item(g) or g for g in b["bgs"]])} for i, b in enumerate(tz["beats"])]}
+                                             "rungs": _beat_rungs([_bg_item(g) or g for g in b["bgs"]])} for b in tz["beats"]]}
     if k in ("long", "explainer"):
         tz = _tl_json(job, "explainer") if k == "explainer" else None
         def own(b):
@@ -472,8 +477,13 @@ def beats(job, want=None):
             tb = next((x for x in tz["beats"] if x["id"] == b.get("beat")), None)
             idx = next((ix for sl, ix in _slots(tb) if sl == b["vi"]), []) if tb else []
             return any(_is_own(tb["bgs"][i]) for i in idx)
-        return {"kind": k, "beats": [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b), source=_vis_source(b.get("visual")),
-                                       rungs=_beat_rungs([b.get("visual") or {}])) for b in long_layout(job)]}
+        out = [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b), source=_vis_source(b.get("visual")),
+                    rungs=_beat_rungs([b.get("visual") or {}])) for b in long_layout(job)]
+        if tz:   # your inserts (insert.py): shown in the strip, taken out with undo
+            out += [{"id": f"{b['id']}_0", "start": b["start"], "dur": b["dur"], "label": "Your insert", "vo": "", "editable": False,
+                     "insert": True, "own": True, "source": None, "rungs": []} for b in tz["beats"] if b.get("insert")]
+            out.sort(key=lambda x: x["start"])
+        return {"kind": k, "beats": out}
     return {"kind": None, "beats": []}
 
 # ---------------------------------------------------------------- workspaces (where a beat's candidates live)
@@ -1067,7 +1077,10 @@ def undo(job, log):
     outp = _tl_out(job, k) if k in TL else Path(j.state["output"])
     if _ostamp(outp) != m.get("after"):
         raise ValueError("the video changed since that edit (a full re-render, or a file was replaced), so it can't be undone step by step")
-    if k in TL:
+    if m.get("type") == "insert":   # your clip / still put in between beats (insert.py): the whole video from before it
+        from . import insert as _ins
+        _ins.undo(job, hd, m, log)
+    elif k in TL:
         ensure_keyframes(job, log, k)   # no-op: the boundaries are still keyframes
         _splice(job, k, outp, m["a"], m["e"], hd / "old.mp4", log)
         shutil.copy2(hd / "teaser.json", _tl_pub(job, k) / "teaser.json")

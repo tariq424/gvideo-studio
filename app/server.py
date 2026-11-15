@@ -230,7 +230,12 @@ def edit_beats(jid):
     except Exception as e: return jsonify(error=str(e)[:300], kind=None, beats=[])
     k = str(j.dir); out.update(busy=edit.status(j.dir), error=edit._busy.get(k + ":err", ""), edits=j.state.get("edits", []),
                                  undo=edit.can_undo(j.dir), history=edit.history(j.dir) if edit.v2() else [], outputs=edit.outputs(j.dir),
-                                 target=edit.kind(j.dir), last=j.state.get("edit_last"))
+                                 target=edit.kind(j.dir), last=j.state.get("edit_last"),
+                                 republish={x: j.state.get(x) for x in ("republish_req", "republish_done", "republish_blocked")})
+    try:   # where your own clip / still can go (insert.py): Shorts and explainers
+        from studio import insert
+        out["points"] = [] if edit._iv(j.dir) else insert.points(j.dir)
+    except Exception: out["points"] = []
     return jsonify(out)
 
 @app.get("/api/jobs/<jid>/rungs")
@@ -307,7 +312,8 @@ def edit_upload(jid):
     j = studio.job(jid); f = request.files.get("file")
     if not f or not f.filename: return jsonify(error="no file"), 400
     ext = _P(f.filename).suffix.lower() or ".webm"
-    if ext not in (".webm", ".mp4", ".mov", ".m4v", ".mkv"): return jsonify(error="video files only"), 400
+    if ext not in (".webm", ".mp4", ".mov", ".m4v", ".mkv", ".jpg", ".jpeg", ".png", ".webp"):   # owner, 2026-11-14: stills too
+        return jsonify(error="a video or a picture (.mp4 .mov .webm .jpg .png .webp)"), 400
     d = _P(j.dir) / "iedit" / "commentary" / "rec"; d.mkdir(parents=True, exist_ok=True)
     out = d / f"rec_{int(_time.time())}{ext}"; f.save(str(out))
     return jsonify(path=str(out))
@@ -332,10 +338,24 @@ def edit_act(jid, action, bid):
             from studio import interview_edit as ie
             err = ie.set_voice(j.dir, bid, bool(b.get("on")), cfg, j.log)
             return (jsonify(error=err), 409) if err else jsonify(ok=True)
+        if action == "insert" and not edit._iv(j.dir):   # owner, 2026-11-14: your own clip / still anywhere in a Short / explainer
+            from studio import insert
+            k = edit.kind(j.dir)
+            err = insert.start(j.dir, k, bid, b.get("src", ""), cfg, j.log, where="after" if b.get("where") == "after" else "before",
+                               dur=float(b["dur"]) if b.get("dur") else None, start=float(b.get("start") or 0), sound="mute" if b.get("sound") == "mute" else "own")
+            return (jsonify(error=err), 409) if err else jsonify(ok=True)
         if action in ("insert", "fade"):   # owner, 2026-11-09: your own commentary between pieces; fade a piece in / out
-            if not edit._iv(j.dir): return jsonify(error="Commentary and fades work on interview videos for now"), 400
+            if not edit._iv(j.dir): return jsonify(error="Fades work on interview videos for now"), 400
             from studio import interview_edit as ie
-            err = (ie.insert_commentary(j.dir, bid, b.get("src", ""), cfg, j.log, "before" if b.get("where") == "before" else "after", bool(b.get("synthetic")))
+            src = b.get("src", "")
+            if action == "insert" and src:
+                from studio import insert
+                if insert.kind_of(src) == "still":   # a picture becomes a short silent clip in the video's frame (2026-11-14)
+                    from pathlib import Path as _P
+                    W, H = (1080, 1920) if ie.kind(j.dir) == "short" else (1920, 1080)
+                    out = _P(j.dir) / "iedit" / "commentary" / "rec" / f"still_{_P(src).stem[:40]}.mp4"; out.parent.mkdir(parents=True, exist_ok=True)
+                    src = str(insert.still_to_clip(src, out, float(b.get("dur") or insert.STILL_SECS), W, H))
+            err = (ie.insert_commentary(j.dir, bid, src, cfg, j.log, "before" if b.get("where") == "before" else "after", bool(b.get("synthetic")))
                    if action == "insert" else ie.set_fade(j.dir, bid, bool(b.get("in")), bool(b.get("out")), cfg, j.log))
             return (jsonify(error=err), 409) if err else jsonify(ok=True)
     except Exception as e:
@@ -371,6 +391,12 @@ def edit_all(jid, action):
                 return jsonify(error=holder), 409
             err = ie.start_rework(j.dir, rep, config.load(), j.log)
             return (jsonify(error=err), 409) if err else jsonify(ok=True)
+        elif action == "save":   # owner, 2026-11-14: done editing -> a paused job goes on; published copies get replaced
+            from studio import editor_session, republish
+            if edit.status(j.dir): return jsonify(error="An edit is still being applied; save when it has finished."), 409
+            editor_session.release(jid, pid=os.getpid(), port=VS_PORT, sid=sid, namespace=_editor_ns())
+            republish.request(j.dir, j.log)
+            j.log("Saved: editing done; published copies of this video are being replaced (the old uploads stay until you delete them)")
         elif action == "cleanup":
             review.prune(j.dir, j.log, full=True)
             if (j.dir / "longedit").exists(): review.prune(j.dir / "longedit", j.log, full=True)
@@ -664,4 +690,10 @@ if __name__ == "__main__":
             if n: print(f"Main channel save: {n} finished job(s) queued", flush=True)
         except Exception as e:
             print(f"Main channel save sweep skipped: {e}", flush=True)
+        try:   # owner, 2026-11-14: an edited video's Save & replace that hadn't finished goes on
+            from studio import republish
+            n = republish.sweep(config.load()["jobs_dir"])
+            if n: print(f"Replace published: {n} edited job(s) queued", flush=True)
+        except Exception as e:
+            print(f"Replace published sweep skipped: {e}", flush=True)
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True, use_reloader=reload)

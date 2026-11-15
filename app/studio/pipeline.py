@@ -752,6 +752,11 @@ class Studio:
                 if str(e) == "cancelled" or type(e).__name__ == "Paused": raise
                 log(f"Quality check skipped ({type(e).__name__}: {str(e)[:200]})")
         release_gpu()
+        if j.state.get("inserts"):   # owner, 2026-11-14: your own clips / stills inserted in the editor survive a full re-render
+            try:
+                from . import insert
+                insert.reapply(j.dir, cfg, log)
+            except Exception as e: log(f"Your inserts not put back ({str(e)[:200]})")
         j.save(status="finished", stage="done"); log("Finished.")
         _backup(j, log)
         if j.state.get("trace"):
