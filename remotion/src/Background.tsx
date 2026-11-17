@@ -102,6 +102,16 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
     if (k === "tpl") return <TemplateBackdrop g={bg.g} dur={dur} />;
     return <HeadlineBackdrop g={bg.g as any} dur={dur} />;
   }
+  if ((bg as any).framed) {
+    // framed camera move (app/studio/camera_moves.py): the still was pre-rendered to an MP4 with a big, sharp, rigid move; play it
+    // untouched (rate 1, no CSS zoom). It dissolves in over 0.47 s when the shot before it is framed too, else cuts.
+    const xf = (bg as any).xf ? interpolate(t, [0, 14 / 30], [0, 1], { extrapolateRight: "clamp" }) : 1;
+    return (
+      <AbsoluteFill style={{ opacity: xf, overflow: "hidden", background: "#000" }}>
+        <Vid bg={{ ...bg, rate: 1 }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      </AbsoluteFill>
+    );
+  }
   if (bg.type === "layers") return <LayersBackdrop layers={bg.layers} dur={dur} seed={seed} />;
   if (bg.type === "video" && bg.fit === "frame") {
     // landscape clip shown whole, over a blurred enlarged copy of itself

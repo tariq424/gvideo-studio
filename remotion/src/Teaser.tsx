@@ -47,7 +47,7 @@ export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats, progre
       {/* footage: one continuous layer; each shot keeps playing 0.4 s under the next one, so a shot that isn't painted on its
           first frame never shows the dark page background (that was a 1-frame flash at every beat change) */}
       {shots.map((x, k) => (
-        <Sequence key={"bg" + k} from={fr(x.start)} durationInFrames={fr(x.dur + 0.4)} premountFor={fps}>
+        <Sequence key={"bg" + k} from={fr(x.start)} durationInFrames={fr(x.dur + ((x.bg as any).framed ? 0.5 : 0.4))} premountFor={fps}>
           <Shot bg={x.bg} dur={x.dur} seed={x.seed} />
         </Sequence>
       ))}

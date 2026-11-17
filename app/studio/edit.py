@@ -691,7 +691,15 @@ def _tl_props(job, k, sd, bid, lay, dest):
     frames = short_frames(tz)[0] if k == "short" else _frames_of(tz)[0]
     a, e = next((x[1], x[2]) for x in frames if x[0] == bid)
     bid = changed
-    props = json.loads(json.dumps(tz))
+    from . import camera_moves, config as _cfg
+    ccfg = _cfg.load()   # framed camera moves: stills pre-rendered for Remotion; the saved timeline only remembers each still's move
+    props = camera_moves.framed_copy(tz, pub, ccfg, log=lambda *_: None, roots=None if dest is not None else {bid: sd})
+    if camera_moves.mode(ccfg) == "framed":   # a framed shot right after the edit dissolves over it: render (and splice) it too
+        starts = camera_moves.first_framed_at(props)
+        while e in starts:
+            nxt = next((x[2] for x in frames if x[1] == e), None)
+            if nxt is None or nxt <= e: break
+            e = nxt
     base = review.files_url(pub) + "/"; sdbase = review.files_url(sd) + "/"
     if k == "explainer": props["progress"] = False
     props["audio"] = base + props["audio"]

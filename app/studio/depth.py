@@ -149,6 +149,8 @@ def cutout_layers(still, out_prefix, log, size=(1080, 1920)):
     bg = np.where(np.asarray(hole)[..., None] > 127, num / den, a)
     p0, p1 = Path(f"{out_prefix}_L0.jpg"), Path(f"{out_prefix}_L1.png")
     Image.fromarray(bg.clip(0, 255).astype(np.uint8)).save(p0, "JPEG", quality=92)
+    if config.load().get("camera_moves") == "framed":   # keep the whole picture under the alpha: framed camera moves re-use it
+        full = im.convert("RGBA"); full.putalpha(fg.split()[-1]); fg = full
     fg.save(p1)
     log(f"  parallax: rembg cut-out ({share:.0%} of the frame is the subject) over a filled background")
     return [p0, p1]

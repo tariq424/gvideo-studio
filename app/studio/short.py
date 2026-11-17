@@ -1303,7 +1303,11 @@ def do_render(job, plan, cfg, meta, log, stop):
     data = json.loads(timeline.read_text(encoding="utf-8"))
     videos = {b.get("src") for beat in data["beats"] for b in beat.get("bgs", []) if b.get("type") == "video"}
     browser_retries, shell_retried = 0, False
+    from . import camera_moves
     for attempt in range(2 * len(videos) + 3):
+        if camera_moves.mode(cfg) == "framed":   # framed camera moves: the stills pre-rendered, passed as props (teaser.json unchanged)
+            pf = camera_moves.render_props(job / "short" / "public", cfg, log, stop)
+            cmd = [a for a in cmd if not a.startswith("--props=")] + [f"--props={pf}"]
         p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         last, t0, tail, errline = "", time.time(), [], ""
         for line in p.stdout:

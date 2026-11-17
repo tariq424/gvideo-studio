@@ -82,6 +82,8 @@ DEFAULTS = {
     "jobs_dir": r"F:\videos\video_studio\jobs",   # outputs stay on F:\videos
     "vet_provider": "local",          # stock-clip vetting: local (Ollama vision) | zai | claude | off
     "vet_model": "qwen2.5vl:7b",
+    "camera_moves": "framed",         # stills: "framed" = big sharp pre-rendered moves (push/pan/dolly/spin, dissolves; studio/camera_moves.py),
+                                      # "legacy" = the old small CSS zoom/parallax in Remotion (owner made framed the default, 2026-11-16).
     "short_concurrency": "auto",      # Remotion workers: auto = by free RAM (2/4/6); a number overrides (studio/short.py)
     "remotion_headless_shell": True,  # render in Remotion's headless Chrome (2x faster, Nov 8); the installed Chrome is the fallback
     "visual_review_default": "never",  # jobs that don't say: never pause for unsure beats, decide on my own (auto | every | never)
