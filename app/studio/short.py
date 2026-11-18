@@ -8,6 +8,17 @@ from .llm import LLM, parse_json
 from .writer import SYSTEM, make_notes, fact_check, audience_line, audience_key, log_audience, jargon_check, editorial_review, COVER_FLOOR
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 179.0   # YouTube Shorts allow up to 180 s (the hard maximum; a second of margin)
+MAX_SPEED = 1.12                          # the most a Short's narration is ever sped up to fit 3:00
+
+
+def fit3(cfg, mode):
+    """-> (fit, word slack). owner, 2026-11-18: a Short paired with an explainer must stay a Short (3:00 at most), or YouTube
+    files it as a regular video and the Related-video link to the explainer can't be set (Studio has no such field then).
+    It is fitted by speeding the narration up (at most MAX_SPEED) before any beat is dropped, so it keeps its content. A Short
+    made alone keeps the owner's 2026-10-23 rule: short_fit_3min (off) - it just runs long."""
+    if cfg.get("short_fit_3min", False): return True, 1.0
+    if mode == "both" and cfg.get("short_fit_3min_paired", True): return True, MAX_SPEED
+    return False, 1.0
 SHORT_MAX = 180.0   # length policy (2026-10-14): target the requested length, accept anything up to 3:00, trim only beyond it
 SMOKE_WORDS = 40   # smoke-test Short: 2 beats of narration; with the ~8-word smoke closing line about 48-50 words (~30 s at this voice's pace)
 KINDS = {"hook", "quote", "stat", "compare", "icons", "timeline"}
@@ -285,8 +296,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
         if not smoke: log(f"  script: {nw0} words (guide {words}; {total} with the jokes){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
-        elif cfg.get("short_fit_3min", False):   # off by default (owner 2026-10-23): a long Short just isn't classed as a Short
-            while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax:
+        elif fit3(cfg, mode)[0]:   # alone: off by default (owner 2026-10-23); paired with an explainer: on (2026-11-18)
+            while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax * fit3(cfg, mode)[1]:
                 cut = j["beats"].pop(-2); log(f"  script too long; dropped a middle beat ({len(cut['vo'].split())} words)")
         plan = {"target_secs": float(secs), "title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
                 "source_spoken": (j.get("source_spoken") or title)[:120],
@@ -331,13 +342,13 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if nl: log(f"  {nl} beat(s) locked to a story subject")
     plan = verify_quotes(plan, transcript, log)
     w3 = budget(cfg, SHORT_MAX, len(plan["sections"]), wpm)[0]   # every narration word that still fits in 3:00, jokes included
-    if not smoke and cfg.get("short_fit_3min", False):   # the fact-check can lengthen the script: cut again (only when fitting 3:00 is on)
-        while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > w3:   # only past 3:00
+    if not smoke and fit3(cfg, mode)[0]:   # the fact-check can lengthen the script: cut again (only when fitting 3:00 is on)
+        while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > w3 * fit3(cfg, mode)[1]:   # only past 3:00 (+ speed-up)
             cut = plan["sections"].pop(-2); log(f"  script grew past the 3:00 limit in the fact-check; dropped a middle beat ({len(cut['vo'].split())} words)")
         for i, x in enumerate(plan["sections"]): x["id"], x["title"] = f"b{i}", f"Beat {i + 1}"
     n = sum(len(x["vo"].split()) for x in plan["sections"])
     if not smoke and n > total * 1.15: log(f"  NOTE: script is {n} words with the jokes, over the {total}-word budget for {int(secs)}s")
-    if not smoke and n > w3: log(f"  NOTE: script is {n} words (budget {total}); past 3:00" + ("; it will be sped up to fit" if cfg.get("short_fit_3min", False) else "; kept as is (YouTube will treat it as a regular video, not a Short)"))
+    if not smoke and n > w3: log(f"  NOTE: script is {n} words (budget {total}); past 3:00" + ("; it will be sped up to fit" if fit3(cfg, mode)[0] else "; kept as is (YouTube will treat it as a regular video, not a Short)"))
     if True:   # owner, 2026-11-07: the video itself never promises a link (a Short published alone said "linked below" with no link)
         promise = re.compile(r"[^.!?]*\b(full (breakdown|video|episode|explainer)|longer video|link(ed)? below|part two|watch the full)\b[^.!?]*[.!?]?\s*", re.I)
         for x in plan["sections"]:
@@ -351,9 +362,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     # closing call-to-action beat
     # owner, 2026-11-07: no "linked below" in the video (the explainer link goes in the description and YouTube's related-video
     # link, by the publisher, only once the explainer is live) and no slow "that was a short summary" sign-off (YouTube data:
-    # viewers leave there). The source stays credited on the end card.
+    # viewers leave there). owner, 2026-11-18: no "summarized from <source>" on the end card either - the source is credited in
+    # the description only.
     cta_vo = "Follow for more."
-    cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Follow for more", "play": False, "arrow": False}
+    cta = {"kind": "cta", "badge": "", "title": "", "line": "Follow for more", "play": False, "arrow": False}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
     w = sum(len(s["vo"].split()) for s in plan["sections"])
     for x in plan["sections"]:   # did the fact-check / jargon passes keep the voice?
@@ -1087,9 +1099,9 @@ def build(job, plan, cfg, log):
     tgt = plan.get("target_secs")
     if tgt and abs(raw_total - tgt) > 3:   # length policy (2026-10-14): the narration keeps its natural pace; only past 3:00 is it sped up
         log(f"  narration {raw_total:.0f}s vs target {tgt:.0f}s; natural pace kept")
-    if raw_total / speed > MAX_SECS and cfg.get("short_fit_3min", False):
+    if raw_total / speed > MAX_SECS and fit3(cfg, plan.get("mode"))[0]:
         speed = raw_total / (MAX_SECS - 1)
-        if speed > 1.12: log(f"  WARNING: narration is {raw_total:.0f}s; even sped up it would exceed 3 minutes. Shorten the script."); speed = 1.12
+        if speed > MAX_SPEED: log(f"  WARNING: narration is {raw_total:.0f}s; even sped up it would exceed 3 minutes. Shorten the script."); speed = MAX_SPEED
         log(f"  narration {raw_total:.0f}s is over the Shorts limit; speeding it up {speed:.2f}x")
     pool = [c for v in pick.values() for c in v]
     fbf = sd / "fallback.json"; fallback = json.loads(fbf.read_text(encoding="utf-8")) if fbf.exists() else {}

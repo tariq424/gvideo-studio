@@ -255,7 +255,7 @@ class Studio:
         if tts_engine in ("kokoro", "wanGP"): j.save(tts_engine=tts_engine)
         if audience in writer.AUDIENCE: j.save(audience=audience)
         what = url or (f"file {up}" if up else "pasted text")
-        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
+        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {(f"{float(minutes):g} min" if float(minutes or 0) > 0 else "auto length")}, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
 
     def create_interview(self, src, context="", extras=None, thanks="", back_camera=True, minutes=15, my_voice=False):
         """Your own interview footage (owner, 2026-11-08): the real conversation leads - a preview of later moments, background
@@ -708,6 +708,10 @@ class Studio:
                         music.mix(final, cfg, log, float(cfg.get("music_long_hook_secs", 8)), seed=jid,
                                   timeline=tl, text=plan.get("title", "") + ": " + " ".join(x["vo"] for x in plan["sections"])[:3000])
                     j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
+                    try:   # owner, 2026-11-18: every video gets a designed thumbnail, the explainer too
+                        from . import thumb916
+                        j.save(thumbnail_long=str(thumb916.make_wide(j.dir, plan, cfg, log)))
+                    except Exception as e: log(f"  explainer thumbnail failed ({str(e)[:200]})")
             if stop():
                 release_gpu()
                 j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return

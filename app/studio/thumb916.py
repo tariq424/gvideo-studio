@@ -95,3 +95,96 @@ def make(job, plan, cfg, log, opts=None):
     (sd / "thumb.json").write_text(json.dumps(o, indent=1), encoding="utf-8")
     log(f"Thumbnail ready: {out}")
     return out
+
+
+# owner, 2026-11-18: every video gets a designed thumbnail - the explainer too (16:9, 1280x720, output/thumbnail_16_9.png).
+# The picture: a frame the explainer itself shows, a face first (the guest or the subject), from the opening beats onward;
+# the text: the hook headline, big, on the left over a dark fade. The YouTube save uses it instead of a frame grab.
+def _wide_candidates(job):
+    pub = Path(job) / "build" / "public"
+    try: beats = json.loads((pub / "teaser.json").read_text(encoding="utf-8"))["beats"]
+    except (OSError, ValueError, KeyError): return pub, []
+    def order(g):   # the guest's own footage, then AI pictures of the subject, then the rest; never a chart or slide
+        tag = str(g.get("tag") or "")
+        return 0 if tag.startswith("SOURCE") else 1 if "GENERATED" in tag else 2 if g["type"] != "video" else 3
+    out = [g for b in beats for g in b.get("bgs", []) if g.get("type") in PICTURE
+           and not str(g.get("src") or "").startswith("charts/")]
+    return pub, sorted(out, key=order)
+
+
+def _wide_picture(job, tmp):
+    """-> a picture file for the explainer's thumbnail: the first of its pictures with a face in it, else its best-ranked one."""
+    import cv2
+    from . import reframe
+    pub, cands = _wide_candidates(job)
+    first = None
+    for i, g in enumerate(cands[:40]):
+        try:
+            if g["type"] == "image": p = pub / g["src"]
+            elif g["type"] == "layers": p = pub / g["layers"][0]
+            else:
+                src = pub / g["src"]; p = Path(tmp).with_name(f"_thumb_w{i}.jpg")
+                media.ff("-ss", f"{media.dur(src) / 2:.2f}", "-i", src, "-frames:v", 1, p)
+            im = cv2.imread(str(p))
+            if im is None: continue
+            first = first or p
+            if reframe.faces(cv2.resize(im, (480, int(im.shape[0] * 480 / im.shape[1])))): return p
+        except Exception:
+            continue
+    return first
+
+
+def _wide_lines(job, plan, o):
+    """The headline: your own text, else the Short's hook (short and punchy), else the explainer's hook card, else the whole
+    title wrapped (never cut off)."""
+    if o.get("text"): return _lines(plan, o)
+    try:
+        from .pipeline import Job
+        sp = Job(job).short_plan() or {}
+        for v in (sp.get("sections") or [{}])[0].get("visuals") or []:
+            g = v.get("chart") or {}
+            if g.get("kind") == "hook" and g.get("lines"): return [str(x).upper() for x in g["lines"]][:4], int(g.get("accent", 0))
+    except Exception:
+        pass
+    for v in (plan.get("sections") or [{}])[0].get("visuals") or []:
+        g = v.get("chart") or {}
+        if g.get("kind") == "hook" and g.get("lines"): return [str(x).upper() for x in g["lines"]][:4], int(g.get("accent", 0))
+    ls = textwrap.wrap(str(plan.get("title") or "").upper(), 18) or ["WATCH THIS"]
+    return ls, len(ls) - 1
+
+
+def make_wide(job, plan, cfg, log, opts=None):
+    from PIL import Image, ImageDraw
+    from .photos import _font
+    job = Path(job); out = job / "output" / "thumbnail_16_9.png"; out.parent.mkdir(exist_ok=True)
+    o = dict(opts or {}); W, H = 1280, 720
+    src = Path(o["image"]) if o.get("image") and Path(o["image"]).exists() else _wide_picture(job, job / "build" / "_thumb.jpg")
+    if src:
+        im = Image.open(src).convert("RGB"); r = max(W / im.width, H / im.height)
+        im = im.resize((int(im.width * r + 0.5), int(im.height * r + 0.5)), Image.LANCZOS)
+        x0 = max(0, int((im.width - W) * 0.65)); y0 = (im.height - H) // 2; im = im.crop((x0, y0, x0 + W, y0 + H))
+    else:
+        im = Image.new("RGB", (W, H), (14, 20, 32))
+    grad = Image.new("L", (W, 1))   # dark on the left, where the headline sits; the picture shows on the right
+    for x in range(W): grad.putpixel((x, 0), int(255 * min(0.86, max(0.0, 1 - x / (W * 0.62)) * 0.95)))
+    im = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), im, grad.resize((W, H)))
+    dr = ImageDraw.Draw(im)
+    acc = COLORS.get(o.get("color", "yellow"), COLORS["yellow"])
+    lines, ai = _wide_lines(job, plan, o)
+    size = 112; f = _font(size, True)
+    while size > 48 and (max(dr.textlength(l, font=f) for l in lines) > W * 0.6 or int(size * 1.08) * len(lines) > H - 120):
+        size -= 4; f = _font(size, True)
+    lh = int(size * 1.08); y = (H - lh * len(lines)) // 2; x = 56
+    for i, l in enumerate(lines):
+        w = dr.textlength(l, font=f); col = acc if i == ai else (255, 255, 255)
+        if i == ai and o.get("color", "yellow") != "white":
+            dr.rectangle([x - 18, y + int(size * 0.06), x + w + 18, y + lh - int(size * 0.02)], fill=acc); col = (17, 17, 17)
+        dr.text((x, y), l, font=f, fill=col, stroke_width=0 if col == (17, 17, 17) else max(3, size // 24), stroke_fill=(0, 0, 0))
+        y += lh
+    ch = (cfg.get("channel_name") or "").strip()
+    if ch:
+        fc = _font(30, True); w = dr.textlength(ch.upper(), font=fc)
+        dr.rounded_rectangle([40, 32, 40 + w + 36, 84], radius=12, fill=(0, 0, 0)); dr.text((58, 40), ch.upper(), font=fc, fill=(255, 255, 255))
+    im.save(out)
+    log(f"Explainer thumbnail ready: {out}")
+    return out

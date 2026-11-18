@@ -88,6 +88,7 @@ DEFAULTS = {
     # how a GENERATED picture shows a real, named person: "photo" (owner, 2026-11-17) or "sketch" (courtroom drawing, 2026-11-07)
     "people_style": "photo",         # stills: "framed" = big sharp pre-rendered moves (push/pan/dolly/spin, dissolves; studio/camera_moves.py),
     "skip_faceless_source": True,     # Shorts: a source clip with people but no face in it (hands / torsos) gives way to a picture (owner, 2026-11-17)
+    "research_commentary": True,      # before each joke: a little web research on the topic (Wikipedia, DuckDuckGo) -> tidbit + opinion (owner, 2026-11-18)
                                       # "legacy" = the old small CSS zoom/parallax in Remotion (owner made framed the default, 2026-11-16).
     "short_concurrency": "auto",      # Remotion workers: auto = by free RAM (2/4/6); a number overrides (studio/short.py)
     "remotion_headless_shell": True,  # render in Remotion's headless Chrome (2x faster, Nov 8); the installed Chrome is the fallback
@@ -143,7 +144,7 @@ DEFAULTS = {
     "tts_fallback": True,             # Kokoro unavailable or failing -> narrate with WanGP instead of stopping the job
     "kokoro_voice": "am_michael",     # Kokoro preset voice (only used when tts_engine is kokoro)
     "own_clips": False,
-    "post_edit_v2": False,            # timeline editor: Remotion explainers editable slot by slot, Short/Explainer switch, open a job by ID,
+    "post_edit_v2": True,             # ON (owner, 2026-11-18: with it off a Remotion explainer could never be opened). Timeline editor: Remotion explainers editable slot by slot, Short/Explainer switch, open a job by ID,
                                       # chat "supply" / "card" actions (studio/edit.py); off = the editor as before               # job form "Provide clips": your footage matched to beats (studio/clips.py)
     "audience": "informed",           # informed (default) | common | beginner (more explanation) | expert (writer.AUDIENCE)
     "kokoro_speed": 1.0,

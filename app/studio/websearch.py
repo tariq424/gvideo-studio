@@ -219,3 +219,15 @@ def search(cfg, query, log=None):
     _save(cfg, st)
     _log(log, f"    search: {len(result)} snippet(s)" + (f" via {used}" if used else " (every route failed or resting)"))
     return result, used
+
+
+def light(cfg, query, log=None):
+    """Research for the narration's commentary (owner, 2026-11-18): Wikipedia, then DuckDuckGo - plain HTTP only, never a browser
+    profile, Copilot or Google (those are kept for QC repair). -> (snippets, route); ([], "") when both find nothing or fail."""
+    for name, fn in (("wikipedia", _wikipedia), ("duckduckgo", _ddg)):
+        try:
+            got = fn(cfg, query)
+            if got: return got, name
+        except Exception as e:
+            _log(log, f"    research {name}: {str(e)[:80]}")
+    return [], ""

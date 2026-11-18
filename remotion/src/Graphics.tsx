@@ -142,7 +142,8 @@ const CTA: React.FC<Extract<Graphic, { kind: "cta" }>> = ({ thumb, title, line, 
     <Band>
       <div style={{ textAlign: "center", transform: `scale(${0.85 + 0.15 * s})`, opacity: s }}>
         {badge ? <div style={{ fontFamily: BODY, fontWeight: 800, fontSize: 36, color: "#111", background: C.gold, display: "inline-block", borderRadius: 999, padding: "10px 28px", marginBottom: 26 }}>{badge}</div> : null}
-        <div style={{ position: "relative", width: 900, height: thumb || play ? 506 : 260, borderRadius: 28, overflow: "hidden", border: `4px solid ${C.gold}`, boxShadow: "0 30px 90px rgba(0,0,0,0.6)",
+        {/* owner, 2026-11-18: no "summarized from" box at the end - the card is only drawn when it has a title, a thumbnail or a play button */}
+        {title || thumb || play ? <div style={{ position: "relative", width: 900, height: thumb || play ? 506 : 260, borderRadius: 28, overflow: "hidden", border: `4px solid ${C.gold}`, boxShadow: "0 30px 90px rgba(0,0,0,0.6)",
           background: `linear-gradient(135deg, #16213a 0%, #0b0f17 60%, #2a1d05 100%)` }}>
           {thumb ? <Img src={asset(thumb)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
           <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.85) 100%)" }} />
@@ -150,7 +151,7 @@ const CTA: React.FC<Extract<Graphic, { kind: "cta" }>> = ({ thumb, title, line, 
             <div style={{ width: 0, height: 0, borderTop: "34px solid transparent", borderBottom: "34px solid transparent", borderLeft: `56px solid white`, marginLeft: 12 }} />
           </div> : null}
           <div style={{ position: "absolute", bottom: 26, left: 30, right: 30, fontFamily: HEAD, fontWeight: 900, fontSize: 46, color: C.text, textAlign: "left", lineHeight: 1.1 }}>{title}</div>
-        </div>
+        </div> : null}
         <div style={{ fontFamily: HEAD, fontWeight: 900, fontSize: 56, color: C.text, marginTop: 34 }}>{line}</div>
         {arrow ? <div style={{ fontSize: 110, color: C.gold, transform: `translateY(${bob}px)`, marginTop: 6, fontFamily: HEAD, fontWeight: 900 }}>↓</div> : null}
       </div>

@@ -19,7 +19,8 @@ def do_charts(job, plan, cfg, log):
     meta = json.loads((job / "src" / "meta.json").read_text(encoding="utf-8")) if (job / "src" / "meta.json").exists() else {}
     credit = f"Based on \"{meta.get('title', '')}\" — {meta.get('channel') or meta.get('uploader') or ''}".strip(" —")
     charts.render({"kind": "title", "title": plan["title"], "subtitle": plan.get("subtitle", ""), "credit": credit}, d / "_title.png")
-    charts.render({"kind": "end", "text": plan.get("end_text") or "Thanks for watching", "credit": credit + (f"  |  {meta.get('webpage_url')}" if meta.get("webpage_url") else "")}, d / "_end.png")
+    # owner, 2026-11-18: the end card never says where the video came from (the description credits the source)
+    charts.render({"kind": "end", "text": plan.get("end_text") or "Thanks for watching", "credit": ""}, d / "_end.png")
     n = 0
     for s in plan["sections"]:
         for v in s["visuals"]:

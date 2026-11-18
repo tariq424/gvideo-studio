@@ -151,6 +151,14 @@ def _draft(cfg, job, kind, channel, title, length, job_dir=None, published=()):
             img = _get_bytes(cfg, f"/api/thumbnail/{seen['channel']}/{job}/{kind}/{seen['metadata']['thumbnail']}")
             d["thumbnail"] = _post_file(cfg, "/api/thumbnail", dict(job=job, channel=channel, kind=kind), img)["thumbnail"]
         except Exception: pass
+    designed = Path(job_dir) / "output" / "thumbnail_16_9.png" if job_dir and kind == "long" else None
+    if not d.get("thumbnail") and designed and designed.is_file():   # the explainer's own designed thumbnail (owner, 2026-11-18)
+        try:
+            import io
+            from PIL import Image
+            buf = io.BytesIO(); Image.open(designed).convert("RGB").save(buf, "JPEG", quality=92)
+            d["thumbnail"] = _post_file(cfg, "/api/thumbnail", dict(job=job, channel=channel, kind=kind), buf.getvalue())["thumbnail"]
+        except Exception: pass
     if not d.get("thumbnail"):
         at = 2.5 if kind == "short" else (_face_frame(job_dir) if job_dir else None) or max(1.0, min(60.0, length * 0.1))
         d["thumbnail"] = _http(cfg, "/api/thumbnail", form=dict(job=job, channel=channel, kind=kind, seconds=f"{at:.2f}"))["thumbnail"]
@@ -172,6 +180,16 @@ def process(cfg, job_dir, log=None):
         say(f"YouTube Publisher not reachable ({str(e)[:120]}); retrying in {RETRY // 60} min"); return False
     mine = {r.get("kind"): r for r in published if r.get("channel") == channel and r.get("job") == job and not r.get("deleted")}
     if "long" in mine and "short" in mine and mine["short"].get("related_video_id") != mine["long"].get("video_id"):
+        # owner, 2026-11-18: a "Short" over 3:00 is filed by YouTube as a regular video - Studio has no Related-video field for
+        # it, so retrying can never succeed (it retried every 10 min). The description's "Full breakdown" link stands.
+        try:
+            from . import media
+            sd = media.dur(vids["short"]) if vids.get("short") else 0
+        except Exception: sd = 0
+        if sd > 180.5:
+            say(f"Short is {sd:.0f}s, over 3:00: YouTube treats it as a regular video, so it has no Related-video link; "
+                "its description links the explainer instead. Not retrying.")
+            return True
         return _link_only(cfg, mine, say)   # both up, the Short's Related video not set yet (see _link_only)
     if "long" in mine and ("short" not in vids or "short" in mine):
         return True   # already saved: only new videos are uploaded

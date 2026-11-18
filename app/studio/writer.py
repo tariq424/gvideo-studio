@@ -48,7 +48,7 @@ At most {max_words} words. Plain bullets starting with "- ". No introduction, no
 TRANSCRIPT PART {i}/{n}:
 {chunk}"""
 
-OUTLINE = """You are planning a {minutes}-minute explainer video (about {words} words of narration) that condenses
+OUTLINE = """You are planning {length_line} that condenses
 "{title}" by {channel}. Below are notes on the whole episode, in order.
 
 Build the outline:
@@ -58,7 +58,7 @@ Build the outline:
 - last section: closing with the key takeaways (about {close_words} words)
 - section titles are short (2-6 words)
 - "points": 2-6 bullet facts from the notes that the section must cover (keep numbers and who said them)
-- "words": narration word budget for the section; all budgets must add up to about {words}
+- "words": narration word budget for the section; {budget_rule}
 
 Reply with ONLY JSON:
 {{"title":"video title, max 70 chars","subtitle":"one-line hook for the title card",
@@ -315,30 +315,61 @@ def _with_extra(notes, extra):
     long source the source notes alone fill that (Nov 6: the counted verdict was cut off and never reached the script)."""
     return (extra.strip() + "\n\n# Source notes\n\n" + notes) if extra.strip() else notes
 
+AUTO_MIN, AUTO_MAX = 3.0, 60.0   # minutes: the floor and the sanity ceiling of an auto-length explainer
+
+
+def auto_words(cfg, transcript):
+    """minutes 0 = auto (owner, 2026-11-18): the explainer is as long as its content needs, never squeezed into a slot. A guide
+    only (for the notes and the outline's section count): about 40% of the source's words, between AUTO_MIN and AUTO_MAX min."""
+    n = len(str(transcript or "").split())
+    return int(min(AUTO_MAX * cfg["wpm"], max(AUTO_MIN * cfg["wpm"], n * 0.4)))
+
+
 def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
-    words = int(minutes * cfg["wpm"])
+    auto = not minutes or float(minutes) <= 0
+    words = auto_words(cfg, transcript) if auto else int(minutes * cfg["wpm"])
+    if auto: minutes = round(words / cfg["wpm"], 1)
     spv = cfg["seconds_per_visual"]
     title, channel = meta.get("title") or "the episode", meta.get("channel") or meta.get("uploader") or "the host"
     with LLM(cfg, log, stop) as llm:
         if workdir: llm.trace_dir = Path(workdir).parent / "prompts"
         meta = dict(meta, verified_notes=verified_notes(workdir))
-        log(f"Writing script with {llm.name} (target {words} words)...")
+        log(f"Writing script with {llm.name} (" + (f"auto length: as long as the content needs, ~{words} words as a guide" if auto
+            else f"target {words} words") + ")...")
         log_audience(cfg, log)
         # 1. notes
         notes_txt = make_notes(llm, meta, transcript, words, log, stop, workdir)
         # 2. outline
         nsec = max(4, round(minutes * 0.6))
+        if auto:   # the content decides: a wide range of sections, budgets that add up to whatever the material needs
+            length_line = (f"an explainer video whose length is set by its content (as a rough guide about {words} words of narration, "
+                           "~" + f"{minutes:.0f} minutes; go longer when the material has more strong points, shorter when it has fewer)")
+            budget_rule = ("together the budgets are as long as the material needs: keep every strong, non-repeating point and "
+                           "the explanation it needs; never pad, never drop a good point to save time")
+            lo, hi = max(3, round(nsec * 0.6)), max(nsec + 2, round(nsec * 1.6))
+        else:
+            length_line = f"a {minutes:g}-minute explainer video (about {words} words of narration)"
+            budget_rule = f"all budgets must add up to about {words}"
+            lo, hi = max(3, nsec - 2), nsec + 2
         def chk(o):
             if not o.get("sections") or len(o["sections"]) < 3: raise ValueError("too few sections")
             for s in o["sections"]:
                 if not s.get("title") or not s.get("points"): raise ValueError("section missing title/points")
         log("  outline")
-        o = llm.chat_json(SYSTEM, OUTLINE.format(minutes=minutes, words=words, title=title, channel=channel,
-                hook_words=int(cfg["wpm"] / 3), close_words=int(cfg["wpm"] / 2.5), nsec_lo=max(3, nsec - 2),
-                nsec_hi=nsec + 2, notes=notes_txt), max_tokens=6000, check=chk)
+        o = llm.chat_json(SYSTEM, OUTLINE.format(length_line=length_line, budget_rule=budget_rule, title=title, channel=channel,
+                hook_words=int(cfg["wpm"] / 3), close_words=int(cfg["wpm"] / 2.5), nsec_lo=lo,
+                nsec_hi=hi, notes=notes_txt), max_tokens=8000, check=chk)
         secs = o["sections"]
         tot = sum(int(s.get("words") or 0) for s in secs) or 1
-        for s in secs: s["words"] = max(30, int((int(s.get("words") or tot / len(secs))) * words / tot))
+        if auto:   # the outline's own budgets stand (within the sanity ceiling); the total is what the content needs
+            for s in secs: s["words"] = max(30, int(s.get("words") or words / len(secs)))
+            tot = sum(s["words"] for s in secs)
+            if tot > AUTO_MAX * cfg["wpm"]:
+                for s in secs: s["words"] = max(30, int(s["words"] * AUTO_MAX * cfg["wpm"] / tot))
+            words = sum(s["words"] for s in secs)
+            log(f"  auto length: the outline needs {len(secs)} sections, {words} words (~{words / cfg['wpm']:.1f} min)")
+        else:
+            for s in secs: s["words"] = max(30, int((int(s.get("words") or tot / len(secs))) * words / tot))
         outline_str = " | ".join(f"{i+1}. {s['title']}" for i, s in enumerate(secs))
         # 3. sections
         total_vis = sum(max(2, round(s["words"] / cfg["wpm"] * 60 / spv)) for s in secs)
@@ -351,7 +382,9 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
             big = k == 1 or k == len(secs) or k == len(secs) // 2
             mrule = ("include ONE motion clip (not first) for the most dynamic moment" if big and motion_left > 0
                      else "none in this section")
-            role = " (the opening hook)" if k == 1 else " (the closing: key takeaways)" if k == len(secs) else ""
+            role = (" (the opening HOOK: the first sentence is the single most surprising claim, number, stake or question in the "
+                    "points, said plainly - never a recap such as 'X opens by...' or an introduction of the host; then in one line who is "
+                    "talking and why it matters to the viewer; end on an open question or promise that makes them stay)") if k == 1 else " (the closing: key takeaways)" if k == len(secs) else ""
             tries = []   # every usable attempt, so a near miss is kept instead of an unchecked re-ask
             def chk2(j, s=s, tries=tries):
                 if not isinstance(j.get("vo"), str): raise ValueError("narration missing")
@@ -747,11 +780,52 @@ def _has_joke(section):
     return bool(j) and len(j.split()) >= 3 and bool(_editorial_span(vo, j))
 
 
+def _joke_span(s):
+    """The beat's joke as it stands in the narration (the writer's own humor line or an earlier punch-up), or ""."""
+    vo = s.get("vo") or ""
+    for j in ((s.get("editorial") or {}).get("humor"), s.get("joke"), s.get("punchline")):
+        j = str(j or "").strip()
+        if len(j.split()) >= 3 and j in vo: return j
+    return ""
+
+
+def short_commentary(cfg, plan, log, budget=None):
+    """owner, 2026-11-18: every Short beat gets one researched sentence (a surprising fact, turned into our quick opinion) just
+    BEFORE its joke - or at its end when it has no joke yet (the punch-up then follows). Skipped once the Short would pass its
+    word budget (3:00). Never blocks the job."""
+    c = dict(cfg)
+    if c.get("anthropic_api_key"):
+        c["script_provider"] = "claude"
+        c["script_model"] = c.get("punch_up_model") or c.get("script_model") or "claude-opus-5-5"
+    done = 0
+    try:
+        from .llm import LLM
+        with LLM(c, log, lambda: False) as llm:
+            for s in plan["sections"]:
+                if s.get("cta") or not s.get("vo") or s.get("commentary"): continue
+                total = sum(len(x["vo"].split()) for x in plan["sections"])
+                if budget and total + 26 > budget:
+                    log(f"  commentary: stopped at {s['id']} (the Short would pass its {budget}-word budget)"); break
+                try: com = research_commentary(llm, c, plan.get("title", ""), s["vo"], log, "short", s["id"])
+                except Exception as e:
+                    log(f"  commentary {s['id']} skipped ({str(e)[:120]})"); continue
+                if not com: continue
+                j = _joke_span(s)
+                s["vo"] = s["vo"].replace(j, com + " " + j, 1) if j else s["vo"].rstrip() + " " + com
+                s["commentary"] = com; done += 1
+    except Exception as e:
+        log(f"  commentary stopped early ({str(e)[:120]})")
+    log(f"Short commentary: {done} beat(s) got a researched line before the joke")
+    return plan
+
+
 def punch_up(cfg, plan, log, force=False, budget=None):
     """Last voice step: every content beat that still has no joke gets one appended, written by Claude when an Anthropic key is
     set (the API; the Claude chat app can't be called), else by the script provider. Never blocks the job."""
     missing = [s for s in plan["sections"] if not s.get("cta") and (force or not _has_joke(s))]
     if not cfg.get("punch_up", True): return plan
+    if cfg.get("research_commentary", False) and not plan.get("smoke"):
+        short_commentary(cfg, plan, log, budget)
     if not missing:
         if not plan.get("smoke"): extra_jokes(dict(cfg), plan, log, budget)
         return plan
@@ -829,6 +903,59 @@ SECTION: "{vo}"
 Reply with JSON only: {{"take": "..."}}"""
 
 
+RESEARCH_Q = """Here is one section of a video's narration about "{title}". Give ONE web search query (3-7 words) that would find
+background on its main topic - the thing, idea or event, not the speaker's opinion. No quotes, no site names.
+SECTION: "{vo}"
+Reply with JSON only: {{"query": "..."}}"""
+
+COMMENT = """Here is one section of a video's narration, and RESEARCH on its topic from the web. Write OUR COMMENTARY for it,
+spoken right after the section and before its closing joke ({sents}, at most {n} words in all):
+{shape}
+Rules: every fact must be stated in RESEARCH (no other new facts, numbers or names; nothing from memory); never repeat what the
+section already says; plain, conversational, no URLs or "according to Wikipedia"; the opinion is ours, sharp but fair.
+SECTION: "{vo}"
+RESEARCH:
+{research}
+Reply with JSON only: {{"commentary": "..."}}"""
+
+COMMENT_SHAPES = {
+    "long": ("2-3 sentences", "1. one interesting, lesser-known fact or piece of context from RESEARCH that the section doesn't say;\n"
+             "2. (optional) one line of summary that ties it back to the section;\n"
+             "3. our opinion: what it means, why it matters, or what the source glosses over - start it with \"Our take:\" or \"Honestly,\"."),
+    "short": ("ONE sentence", "one surprising fact from RESEARCH the beat doesn't say, turned into our quick opinion on it."),
+}
+
+
+def _nums(text):
+    return {x.replace(",", "") for x in re.findall(r"\d(?:[\d,.]*\d)?", text or "")}
+
+
+def research_commentary(llm, cfg, title, vo, log, kind="long", sid=""):
+    """owner, 2026-11-18: deeper commentary before each joke - a little research on the section's topic (websearch.light:
+    Wikipedia, then DuckDuckGo), then a tidbit / summary / opinion from it. -> the commentary, or "" (nothing found or no
+    usable answer: the caller falls back to the plain take). A number in it must appear in the research or the section."""
+    from . import websearch
+    n = 60 if kind == "long" else 24
+    q = str(llm.trace(f"research q {sid}").chat_json("You write precise web search queries. Reply with JSON only.",
+            RESEARCH_Q.format(title=str(title).replace('"', "'"), vo=vo.replace('"', "'")[:1500]), max_tokens=100)["query"]).strip()
+    snips, route = websearch.light(cfg, q, log)
+    if not snips:
+        log(f"  research {sid}: nothing found for \"{q}\""); return ""
+    research = "\n".join("- " + x[:500] for x in snips[:4])
+    sents, shape = COMMENT_SHAPES[kind]
+    def chk(j):
+        t = str(j.get("commentary") or "").strip()
+        if not 8 <= len(t.split()) <= n + 6: raise ValueError(f"the commentary must be 8-{n} words")
+        if " ".join(t.lower().split())[:60] in " ".join(vo.lower().split()): raise ValueError("it repeats the section")
+        extra = _nums(t) - _nums(research) - _nums(vo)
+        if extra: raise ValueError(f"numbers not in the research: {sorted(extra)}; use only facts from RESEARCH")
+    t = str(llm.trace(f"commentary {sid}").chat_json("You are a sharp, well-read video essayist. Reply with JSON only.",
+            COMMENT.format(sents=sents, n=n, shape=shape, vo=vo.replace('"', "'"), research=research), max_tokens=500, check=chk)["commentary"]).strip()
+    if t[-1:] not in ".!?": t += "."
+    log(f"  commentary {sid} (research via {route}: \"{q}\"): {t}")
+    return t
+
+
 def _sentences(text):
     return [x for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x]
 
@@ -862,13 +989,22 @@ def punch_up_long(cfg, plan, log, stop=None):
                     t = str(j.get("take") or "").strip()
                     if not 6 <= len(t.split()) <= 30: raise ValueError("the take must be 6-25 words")
                     if " ".join(t.lower().split()) in " ".join(vo.lower().split()): raise ValueError("the take repeats the section")
-                try:
+                com = ""
+                if cfg.get("research_commentary", False) and not s.get("commentary"):   # researched tidbit + summary + opinion, before the joke
+                    try: com = research_commentary(llm, cfg, plan.get("title", ""), vo, log, "long", sid)
+                    except Exception as e:
+                        if str(e) == "stopped": raise
+                        log(f"  commentary {sid} skipped ({str(e)[:120]})")
+                if com:
+                    vo = vo.rstrip() + " " + com; s["take"] = com; s["commentary"] = com; takes += 1
+                else:
+                  try:
                     t = str(llm.trace(f"take {sid}").chat_json("You write sharp, original one-sentence analysis. Reply with JSON only.",
                             TAKE.format(n=25, vo=vo.replace('"', "'")), max_tokens=300, check=chk_take)["take"]).strip()
                     if t[-1:] not in ".!?": t += "."
                     vo = _insert_after(vo, 0.6, t); s["take"] = t; takes += 1
                     log(f"  take {sid} ({llm.name}): {t}")
-                except Exception as e:
+                  except Exception as e:
                     if str(e) == "stopped": raise
                     log(f"  take {sid} skipped ({str(e)[:120]})")
                 spots = [(1.0, " ".join(_sentences(vo)[-4:]))]
@@ -895,5 +1031,7 @@ def punch_up_long(cfg, plan, log, stop=None):
         if str(e) == "stopped": raise
         log(f"  explainer punch-up stopped early ({str(e)[:150]})")
     n = sum(1 for s in plan["sections"] if not s.get("cta"))
-    log(f"Explainer voice: {takes} of {n} sections got our take, {jokes} jokes added (summary first, punch-up second)")
+    nc = sum(1 for s in plan["sections"] if s.get("commentary"))
+    log(f"Explainer voice: {takes} of {n} sections got our take, {jokes} jokes added ({nc} with researched commentary; "
+        "summary first, commentary second, punch-up last)")
     return plan

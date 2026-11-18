@@ -28,9 +28,9 @@ pre{background:var(--inset);border:1px solid var(--line);border-radius:8px;paddi
 .sc-bns{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}.sc-bn{padding:2px 6px;font-size:12px;min-width:28px;line-height:16px}
 .sc-bn.cur{background:var(--acc);color:#111;border-color:var(--acc);font-weight:700}.sc-bn.off{opacity:.5}.sc-bn .mk-dot{width:6px;height:6px;margin:0 0 0 2px}
 .sc-wrap{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}.sc-main{flex:1 1 420px;min-width:0}
-.sc-lad{flex:0 1 300px;max-height:220px;overflow:auto;font-size:12.5px;line-height:1.35;border:1px solid var(--line);border-radius:8px;padding:6px 8px;box-sizing:border-box}
-.lad-h{font-weight:700;margin-bottom:4px}.lad-slot{margin:4px 0 6px}.lad-n{font-weight:600;font-size:12px;opacity:.8}
-.lad-f{color:#c0392b;margin-left:6px}.lad-ok{color:#1e8449;margin-left:6px}
+.sc-lad{max-height:180px;overflow:auto;font-size:12.5px;line-height:1.45;border-left:3px solid #c0392b;background:rgba(192,57,43,.05);border-radius:6px;padding:6px 10px;margin:0 0 8px;box-sizing:border-box}
+.lad-h{font-weight:700;margin-bottom:2px}.lad-slot{margin:2px 0}.lad-n{font-weight:600;margin-right:4px}
+.lad-f{color:#c0392b}.lad-ok{color:#1e8449;font-weight:600}.lad-ar{opacity:.55;margin:0 4px}
 .sc-key{font-size:11.5px;margin-top:3px}.sc-key span{display:inline-block;width:10px;height:7px;border-radius:2px;margin:0 3px 0 8px}
 .mk-dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 4px 0 2px;vertical-align:middle}
 .sec-edit{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.sec-edit input{font-weight:600}
@@ -135,7 +135,9 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp){display:none}
    <label>Which clip goes where (optional)</label><textarea id="cliph" data-testid="clip-hints" rows="2" placeholder="clip 1 is the church exterior, clip 2 is the interior through bars   — or —   clip1=beat3, clip2=beat5,6"></textarea>
    <div class="mut" style="font-size:12.5px">Clips are numbered in the order chosen (uploads first, then paths). Beats your footage doesn't cover get the usual generated visuals; you can move clips in the timeline editor.</div></details></div>
   <div id="m_short"><label>Short length: <b id="sv">2:45</b> (YouTube Shorts max is 3:00)</label><input id="ssec" data-testid="short-length" aria-label="Short length" type="range" min="120" max="176" step="5" value="165" oninput="sv.textContent=fmt(+this.value)" onchange="sv.textContent=fmt(+this.value)" style="width:100%"></div>
-  <div id="m_long"><label>Long video length: <b id="mv">15</b> minutes</label><input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="3" max="20" value="15" oninput="mv.textContent=this.value" onchange="mv.textContent=this.value" style="width:100%">
+  <div id="m_long"><label>Long video length: <b id="mv">Auto</b></label>
+   <label style="display:block;font-size:13px"><input type="checkbox" id="minauto" data-testid="long-length-auto" checked onchange="$('min').disabled=this.checked;mv.textContent=this.checked?'Auto':$('min').value+' minutes'"> Auto: as long as the content needs (never squeezed)</label>
+   <input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="3" max="60" value="15" disabled oninput="mv.textContent=this.value+' minutes'" onchange="mv.textContent=this.value+' minutes'" style="width:100%">
    <label><input id="caps" data-testid="toggle-captions" type="checkbox" checked> Animated captions with icons</label>
    <label><input id="pres" data-testid="toggle-presenter" type="checkbox"> On-screen presenter (small corner window, experimental)</label></div>
   <label>Narration</label><select id="ttse" data-testid="narration-engine" aria-label="Narration"><option value="">Settings default (Kokoro, falls back to WanGP)</option><option value="kokoro">Kokoro (fast preset voice)</option><option value="wanGP">WanGP cloned voice (slow)</option></select>
@@ -184,7 +186,7 @@ async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn')
   for(const [a,v] of [['mode','interview'],['src_path',$('ivp').value.trim()],['interview_context',$('ivc').value],['interview_extras',$('ivx').value],['interview_thanks',$('ivt').value],['interview_minutes',$('ivm').value],['interview_back_camera',$('ivb').checked?'1':'0'],['interview_my_voice',$('ivv').checked?'1':'0']])fd.append(a,v);
   try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;$('ivp').value='';$('ivc').value='';$('ivx').value='';$('ivt').value='';$('cmsg').textContent='';STARTING=false;loadJobs()}catch(e){$('cmsg').textContent=e.message;STARTING=false;$('makebtn').disabled=false}
   return}
- const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,tts_engine:$('ttse').value,audience:$('aud').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
+ const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('minauto').checked?0:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,tts_engine:$('ttse').value,audience:$('aud').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
  if($('s_clips')&&$('s_clips').style.display!='none'){for(const cf of $('clipf').files)fd.append('clips',cf);fd.append('clip_paths',$('clipp').value);fd.append('clip_hints',$('cliph').value)}
@@ -463,7 +465,7 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <button class="sec ${tgt!='short'?'on':''}" data-testid="scrub-pick-long" aria-pressed="${tgt!='short'}" ${has('long')&&!d.busy?'':'disabled'} onclick="${tgt!='short'?'':"edTarget('long')"}">Explainer</button></div>`;
  h+=`<div id="scr_vo" data-testid="scrub-vo" class="scr-vo" hidden></div>`;
  // owner, 2026-11-17: how the picture was made sits ABOVE the scrubber; the ladder (what failed, what fired) in a panel beside it
- h+=`<div id="scr_rung" data-testid="scrub-rung" class="src-note" style="font-weight:600;white-space:pre-line" hidden></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div>`;
+ h+=`<div id="scr_rung" data-testid="scrub-rung" class="src-note" style="font-weight:600;white-space:pre-line" hidden></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div><div id="scr_lad" class="sc-lad" data-testid="scrub-ladder" aria-label="Visual ladder for this beat"></div>`;
  h+=`<div class="sc-wrap"><div class="sc-main">`;
  h+=`<input type="range" id="scr_r" data-testid="scrub-range" aria-label="Scrub the video" min="0" max="${D.toFixed(2)}" step="0.05" value="${(v.currentTime||0).toFixed(2)}" oninput="scSeek(this.value)" style="width:100%;margin:0">`;
  if(D>0&&ED.beats.length){const W=(el.clientWidth||900)-24;   // owner, Nov 10: beat numbers you can read and click; each stretch's rung marked under them
@@ -476,7 +478,7 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <button class="sec" data-testid="scrub-play" onclick="$('ov').play()">▶ Play</button><button class="sec" data-testid="scrub-stop" onclick="$('ov').pause()">■ Stop</button>
   <span data-testid="scrub-time" id="scr_t" style="font-variant-numeric:tabular-nums;font-weight:600">0:00.0</span><span class="mut" style="font-size:13px">/ ${fmtTs(D)}</span>
   <span data-testid="scrub-beat" id="scr_b" class="rv-badge">—</span>
-  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div></div><aside id="scr_lad" class="sc-lad" data-testid="scrub-ladder" aria-label="Visual ladder for this beat"></aside></div></div>`;
+  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div></div></div></div>`;
  el.innerHTML=h;scTick()}
 // ---- how each stretch's picture was made (owner, 2026-11-10: "I don't see the source of the clip, e.g. stock video or the rung")
 const RUNGN={ai_image:'AI image',chatgpt_chain:'ChatGPT image chain',static_image:'still image',card:'headline card',meta_chain:'Meta image → video',flow:'Google Flow video'};
@@ -493,11 +495,13 @@ function stMore(s){const pr=String(s.provider||'').toLowerCase(),d=String(s.deta
 function stList(bt){const ss=bt.stretches||[];if(!ss.length)return'';
  return`<div class="src-note" data-testid="edit-stretches"><b>Pictures in this beat</b><ul style="margin:4px 0 0 18px;padding:0">${ss.map(s=>`<li><a href="#" onclick="scSeek(${((bt.start||0)+s.a+0.05).toFixed(2)});return false">${fmtT((bt.start||0)+s.a)}–${fmtT((bt.start||0)+s.b)}</a> <span class="mk-dot mk-${stKind(s)}"></span>${esc(stName(s))}${s.credit&&s.credit!=s.how?' · '+esc(s.credit):''}${s.fix?' · fixed from the defect report ('+esc(s.fix)+')':''}${stMore(s)?`<br><span class="mut" style="font-size:12px">${esc(stMore(s))}</span>`:''}</li>`).join('')}</ul></div>`}
 // the visual ladder of the beat under the playhead: per picture slot, each rung that failed and why, then the one that fired
+// owner, 2026-11-18: above the scrubber, one line per picture - every rung that failed (and why), then the one that fired
 function ladHtml(b){if(!b)return`<div class="mut">Scrub to a beat to see its visual ladder.</div>`;const L=b.ladder||[];
- let h=`<div class="lad-h">${esc(b.label)} · visual ladder</div>`;if(!L.length)return h+`<div class="mut">No ladder record for this beat (your footage, or made before records were kept).</div>`;
- for(const sl of L){h+=`<div class="lad-slot"><div class="lad-n">Picture ${esc(String(sl.slot).replace(/^#/,''))}</div>`;
-  for(const [r,why] of (sl.failed||[]))h+=`<div class="lad-f"><b>Failed:</b> ${r?esc(r)+': ':''}${esc(why)}</div>`;
-  h+=sl.used?`<div class="lad-ok"><b>Fired:</b> ${esc(sl.used)}</div>`:`<div class="lad-f"><b>Nothing fired</b></div>`;h+=`</div>`}
+ let h=`<div class="lad-h">${esc(b.label)} · visual ladder (failed → fired)</div>`;if(!L.length)return h+`<div class="mut">No ladder record for this beat (your footage, or made before records were kept).</div>`;
+ const ar=`<span class="lad-ar">→</span>`;
+ for(const sl of L){const parts=(sl.failed||[]).map(([r,why])=>`<span class="lad-f">✗ Failed: ${r?esc(r)+': ':''}${esc(why)}</span>`);
+  parts.push(sl.used?`<span class="lad-ok">✓ Fired: ${esc(sl.used)}</span>`:`<span class="lad-f"><b>Nothing fired</b></span>`);
+  h+=`<div class="lad-slot"><span class="lad-n">Picture ${esc(String(sl.slot).replace(/^#/,''))}:</span>${parts.join(ar)}</div>`}
  return h}
 function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
 function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.currentTime||0;
