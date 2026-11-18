@@ -44,10 +44,10 @@ FORMAT = "Put the final prompt on its own line, starting with PROMPT:"
 _PPL = {"now": []}
 def _people_line():
     from . import people
-    return people.DESCRIBE_RULE + (" " + people.rule(_PPL["now"]) if _PPL["now"] else (" " + people.SNAP_RULE if _PPL.get("snap") else ""))
+    return people.DESCRIBE_RULE + (" " + people.rule(_PPL["now"]) if _PPL["now"] else (" " + people.snap_rule() if _PPL.get("snap") else ""))
 def _rule_now():
     from . import people
-    return people.rule(_PPL["now"]) or (people.SNAP_RULE if _PPL.get("snap") else "")
+    return people.rule(_PPL["now"]) or (people.snap_rule() if _PPL.get("snap") else "")
 NARRATION = "Write a prompt for a photorealistic image that illustrates this narration, without brands or text: "
 GENERATE = "Generate an image: "
 VARIANTS = ["Generate a second image of the same scene from a different camera angle, same style and lighting.",
@@ -66,7 +66,17 @@ FIT_AUDIT = "fit_audit.json"
 HF_SPACE = "black-forest-labs/FLUX.1-schnell"   # Hugging Face's free hosted FLUX (ZeroGPU): runs on their GPUs, not this PC
 _job_skip = {}       # site -> why it's skipped for the rest of this job
 _last = {}           # site -> when it last answered: each service is paced like a person, not a script
-_site = {"cur": "gemini"}   # the service that made the images generate_many returned last (for tag())
+_site = {"cur": "gemini"}
+_tries = []   # what each service did in the last generate_many call: [(site, "ok" / "skipped: ..." / "failed: ..." / "failed narration fit")]
+
+
+def last_tries():
+    return list(_tries)
+
+
+def tries_text():
+    """'cloudflare: failed (HTTP 400 NSFW); hf: skipped (cooling down)' - for the ladder log and the editor's rung panel."""
+    return "; ".join(f"{s}: {w}" for s, w in _tries if w != "ok")   # the service that made the images generate_many returned last (for tag())
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
 UA_EDGE = UA + " Edg/141.0.0.0"
 CHATGPT_URL = "https://chatgpt.com/"
@@ -724,7 +734,7 @@ def _session_flow(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     """Google Flow still (route r14, the signed-in Flow profile): Flow's agent makes stills at 0 credits (owner, 2026-11-07); the
     route rejects any quote above 0. Flow draws text well, so a still with words, a logo or a masthead is refused here."""
     from . import mediaroutes
-    if not cfg.get("flow_on", True): raise Skip("Flow is off (setting flow_on)")
+    if not cfg.get("flow_on", True): raise Skip("skipped: Google flags automated Flow use (flow_on off)")
     if not mediaroutes.available(cfg, "r14"): raise Skip("no signed-in Flow profile (media_routes data folder)")
     prompt = _text_prompt(cfg, sec, log)
     _pause(cfg, log, "this beat's image", "flow")
@@ -943,6 +953,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     The video's service first (rotation), then the others if it fails; last_site() says which one made them.
     On PORT=42022 only, every generated/resumed image also has to pass a local narration-fit check before
     it can be selected; rejected and unavailable evidence is kept under imagegen/_rejected."""
+    _tries.clear()
     count = max(1, min(int(count), 1 + len(VARIANTS), int(cfg.get("imagegen_per_beat", 1))))
     if not cfg.get("imagegen_on", True):
         return []
@@ -1003,11 +1014,11 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     described = None   # the screenshot described once by the local vision model, for the services that take a text prompt
     for site in tries:
         if _job_skip.get(site):
-            log(f"  {site} skipped ({_job_skip[site][:140]})"); continue
+            log(f"  {site} skipped ({_job_skip[site][:140]})"); _tries.append((site, f"skipped ({_job_skip[site][:80]})")); continue
         cool = _cooling(cfg, sd, site)
         if cool:
             _job_skip[site] = f"cooling down until {time.strftime('%H:%M', time.localtime(cool['until']))}: {cool['why'][:100]}"
-            log(f"  {site} skipped ({_job_skip[site]})"); continue
+            log(f"  {site} skipped ({_job_skip[site]})"); _tries.append((site, f"skipped ({_job_skip[site][:80]})")); continue
         out = d / f"{key}_{site}.jpg"
         extras = [d / f"{key}_{site}_{k + 2}.jpg" for k in range(count - 1)]
         def evidence(page, step, site=site):
@@ -1036,12 +1047,14 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
             _job_skip[site] = s_.why
             if cool: _cool(cfg, sd, cool, s_.why, site)
             log(f"  {site} skipped: {s_.why}" + (f" (retried after {cool // 3600} h)" if cool else " (rest of this job)") + "; next service")
+            _tries.append((site, f"skipped ({str(s_.why)[:80]})"))
             continue
         except Exception as e:
             if str(e) == "cancelled": raise
             out.unlink(missing_ok=True)
             fails = sorted(d.glob(f"{key}_{site}_*_fail.png"))
             log(f"  {site} failed ({str(e).splitlines()[0][:200]})" + (f"; screenshot {fails[-1]}" if fails else "") + "; next service")
+            _tries.append((site, f"failed ({(str(e).splitlines() or [''])[0][:80]})"))
             continue
 
         got = [out] + [x for x in extras if x.is_file()]
@@ -1058,6 +1071,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
                 got = kept
             else:
                 log(f"  fit: {site}: all image(s) failed narration fit; next provider")
+                _tries.append((site, "failed the narration-fit check"))
                 continue
 
         if cfg.get("imagegen_rotate", False) and site not in (first, pref):   # the video's service is out: the rest of this video uses the one that worked (one look per video)
@@ -1068,7 +1082,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
         led.write_text(json.dumps(used, indent=1), encoding="utf-8")
         out.with_suffix(".prompt.txt").write_text(prompt, encoding="utf-8")
         _site["cur"] = site
-        log(f"  {site}: {len(got)} image(s) ready ({time.time() - t0:.0f}s)")
+        log(f"  {site}: {len(got)} image(s) ready ({time.time() - t0:.0f}s)"); _tries.append((site, "ok"))
         return [(x, prompt) for x in got]
     return []
 

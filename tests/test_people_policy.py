@@ -6,6 +6,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from studio import people, imagegen, source_visuals, storyboard  # noqa: E402
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _sketch_style(monkeypatch):
+    """These tests pin the courtroom-sketch style (people_style: "sketch"); photoreal is the default since 2026-11-17."""
+    from studio import people as _p
+    monkeypatch.setattr(_p, "_sketchy", lambda: True)
+
+
 ENTS = [{"name": "Daniella Weiss", "kind": "person"}, {"name": "Bassem Youssef", "kind": "person"}, {"name": "Gaza", "kind": "place"}]
 
 

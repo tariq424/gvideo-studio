@@ -122,7 +122,7 @@ def pieces(text, wpm, secs=4.0, min_words=6):
 def _people_rule(sec):
     from . import people
     ppl = sec.get("people") or []
-    return (f"The people it names ({', '.join(ppl)}) may appear, never anonymised: draw each as {people.SKETCH}. "
+    return (f"The people it names ({', '.join(ppl)}) may appear, never anonymised: show each as {people.style()}. "
             if ppl else "People may appear as they are. ")
 
 

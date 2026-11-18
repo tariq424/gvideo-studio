@@ -522,11 +522,19 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
     phases = coherence.beat_phases([x for x in plan["sections"] if not x.get("cta")])
     pre, step1, slots, prej = {}, {}, [], {}
+    faceless = {}   # beat -> why its source clip was set aside (people in it, but no face: owner, 2026-11-17)
 
     def prepare(s):
         n = needs[s["id"]]; items = []; rej = []
         from . import source_visuals
         raw_source = _safe(log, f"{s['id']} source clip", lambda: source_visuals.make(cfg, job, sd, s, log))
+        if raw_source and raw_source.get("type") == "video" and cfg.get("skip_faceless_source", True):
+            # owner, 2026-11-17: a source clip of hands and torsos with no face in it (a tight two-shot) is a hand on black in a
+            # tall frame; the beat gets a picture from the next rung instead (or its stock back)
+            from . import reframe
+            fw = _safe(log, f"{s['id']} source clip face check", lambda: reframe.faceless_people(raw_source["path"])) or ""
+            if fw:
+                log(f"  {s['id']}: source clip {fw}; a picture instead"); faceless[s["id"]] = fw; raw_source = None
         source = None
         if raw_source:
             source = dict(raw_source); source["src"] = _rel_sd(source.pop("path"), sd)
@@ -676,6 +684,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             capcut.mark(sd, s["id"], None)   # re-deciding this beat: a CapCut mark from an earlier run no longer applies
         for sl in [x for x in slots if x["beat"] == s["id"]]:
             r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
+            if s["id"] in faceless and "source clip" not in failed: why.insert(0, f"source clip: {faceless[s['id']]}"); failed.append("source clip")
             cloud = r.get("src") == "cloud"
             if "cloud" in r and not cloud:   # cloud tried (or skipped) and gave nothing usable: WanGP's still is next
                 chain.append("cloud"); why.append(f"cloud: {r.get('cloud_why') or 'failed'}"); failed.append("cloud")
@@ -833,6 +842,7 @@ def _safe(log, rung, fn, default=None):
 def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log, pos=None):
     """Visual ladder v2, rungs 5-10 for one slot whose cloud / WanGP still didn't pass. -> the bg item. Appends to chain / why /
     failed. vb carries per-beat state: physics and graphics run once per beat (a second slot of the same beat goes on down).
+    0. a fresh AI picture from the narration (every image service in turn; owner, 2026-11-17)
     5. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
        the script's map coordinates, or a labelled synthetic path), saved to short/physics/<slot>.json
     6. Remotion graphics: draws that payload as a motion-graphics clip; without a payload, a template / Claude composition
@@ -847,6 +857,24 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
         if lay:
             chain.append("parallax")
             return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
+    # owner, 2026-11-17: "why is it that nothing fired and we drop down to card? worst case we could have made a cloudflare image from
+    # description". A slot the beat's own AI image didn't cover (imagegen_per_beat) gets a fresh picture from the narration -
+    # every image service in turn - before the 3D studio, the drawings and the card (no AI image cap).
+    if cfg.get("imagegen_on", True) and cfg.get("slot_pictures", True):
+        from . import imagegen
+        k = int(str(sl["key"]).rsplit("_", 1)[-1]) if str(sl["key"]).rsplit("_", 1)[-1].isdigit() else 0
+        s2 = s if k == 0 else dict(s, vo=f"{s.get('vo', '')} (Show a different moment or detail of this than the beat's other pictures.)")
+        from . import depth
+        imgs = _safe(log, "AI image (narration)", lambda: imagegen.generate_many(cfg, sd, s2, f"{sl['key']}_pic", log, aspect="9:16",
+                                                                                image=None, count=1), []) or []
+        if imgs:
+            img = imgs[0][0]; site = imagegen.last_site()
+            lay = _safe(log, f"{sl['key']} parallax", lambda: depth.cutout_layers(img, sd / "imagegen" / f"{sl['key']}_pic_px", log))
+            chain.append(f"AI image ({site}, from the narration)")
+            if lay:
+                return {"type": "layers", "layers": [_rel_sd(p_, sd) for p_ in lay], "tag": imagegen.tag(site), "rung": "imagegen", "site": site}
+            return {"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(site), "rung": "imagegen", "site": site}
+        why.append(f"AI image: {imagegen.tries_text() or 'no service made one'}"); failed.append("imagegen")
     if cfg.get("studio3d_on", True) and not vb.get("s3"):   # owner, 2026-11-13: a real 3D model in the studio, ahead of the drawings
         vb["s3"] = True
         from . import studio3d

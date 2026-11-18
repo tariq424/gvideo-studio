@@ -447,6 +447,60 @@ def _bg_source(bgs, sec):
     return "; ".join(notes)
 
 
+# ---------------------------------------------------------------- the ladder panel (owner, 2026-11-17)
+# "at the top show which rung failed and how. For example Failed: stock: not found, Failed: AI image: rate limited. This way it will
+# show which rung fired. show all this in a side panel next to scrubber."
+_ANSI = re.compile(r"\x1b\[?[0-9;]*m?")
+_FAILWORD = re.compile(r"(?i)\b(fail\w*|skipp\w*|nothing|rejected|timed? ?out|blocked|error|crash\w*|refused|limit|cooling|"
+                       r"unavailable|couldn.t|can.t)\b|\bno (usable|coherent|image|service|photo|stock)")
+
+
+def _clean(t, n=160):
+    t = _ANSI.sub("", str(t or "")); t = re.sub(r"\s+", " ", t).strip()
+    return t if len(t) <= n else t[:n - 1] + "\u2026"
+
+
+def _split_why(why):
+    """'stock: no coherent stock; graphics: crash (...)' -> [(rung, reason)]."""
+    out = []
+    for part in re.split(r";\s+(?=[A-Za-z][\w /-]{0,30}:\s)", why):
+        m = re.match(r"\s*([A-Za-z][\w /-]{0,30}?):\s*(.*)$", part, re.S)
+        if m: out.append((m.group(1).strip(), _clean(m.group(2))))
+        elif part.strip(): out.append(("", _clean(part)))
+    return out
+
+
+def ladder(job, bid, k=None):
+    """What the visual ladder tried for a beat: [{"slot", "used", "failed": [[rung, reason], ...]}] (Shorts: from the fallback
+    chains; explainers: from the job log)."""
+    job = Path(job); k = k or kind(job)
+    out = []
+    if k == "short":
+        f = job / "short" / "fallback" / "chains.json"
+        try: ch = (json.loads(f.read_text(encoding="utf-8")) or {}).get(bid) or {}
+        except (OSError, ValueError): ch = {}
+        for i, line in enumerate(ch.get("chain") or []):
+            line = _ANSI.sub("", str(line))
+            m = re.match(r"^(.*?)  \((.*)\)$", line, re.S)
+            head, why = (m.group(1), m.group(2)) if m else (line, "")
+            used = head.split(" -> ")[-1].strip() if " -> " in head else re.sub(r"\s*\(.*$", "", head).strip()
+            out.append({"slot": f"#{i + 1}", "used": _clean(used, 90), "failed": [list(x) for x in _split_why(why)]})
+        return out
+    lf = job / "log.txt"
+    try: lines = lf.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError: return out
+    rx = re.compile(rf"^\[[\d:]+\]\s+(?:still |graphics )?({re.escape(bid)}(?:_\d+)?)(?:#\d+)?:\s*(.*)$")
+    slots = {}
+    for ln in lines:
+        m = rx.match(ln)
+        if not m: continue
+        sl = slots.setdefault(m.group(1), {"slot": m.group(1), "used": None, "failed": []})
+        msg = _clean(m.group(2))
+        if _FAILWORD.search(msg): sl["failed"].append(["", msg])
+        else: sl["used"] = _clean(msg, 90)
+    return list(slots.values())
+
+
 def beats(job, want=None):
     """The timeline for the job page: {kind, beats: [{id, start, dur, label, editable, rungs}]}. want: "short" / "long" to read
     that output's timeline without changing the editor's target (Newsroom's rung strip)."""
@@ -468,7 +522,8 @@ def beats(job, want=None):
                                              "editable": b["id"] not in cta and not b.get("insert"), "insert": bool(b.get("insert")),
                                              "own": bool(b.get("insert")) or any(_is_own(g) for g in b["bgs"]),
                                              "source": _bg_source(b["bgs"], secs.get(b["id"])),
-                                             "rungs": _beat_rungs([_bg_item(g) or g for g in b["bgs"]])} for b in tz["beats"]]}
+                                             "rungs": _beat_rungs([_bg_item(g) or g for g in b["bgs"]]),
+                                             "ladder": ladder(job, b["id"], "short")} for b in tz["beats"]]}
     if k in ("long", "explainer"):
         tz = _tl_json(job, "explainer") if k == "explainer" else None
         def own(b):
@@ -478,7 +533,7 @@ def beats(job, want=None):
             idx = next((ix for sl, ix in _slots(tb) if sl == b["vi"]), []) if tb else []
             return any(_is_own(tb["bgs"][i]) for i in idx)
         out = [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b), source=_vis_source(b.get("visual")),
-                    rungs=_beat_rungs([b.get("visual") or {}])) for b in long_layout(job)]
+                    rungs=_beat_rungs([b.get("visual") or {}]), ladder=ladder(job, b["id"], k)) for b in long_layout(job)]
         if tz:   # your inserts (insert.py): shown in the strip, taken out with undo
             out += [{"id": f"{b['id']}_0", "start": b["start"], "dur": b["dur"], "label": "Your insert", "vo": "", "editable": False,
                      "insert": True, "own": True, "source": None, "rungs": []} for b in tz["beats"] if b.get("insert")]

@@ -47,7 +47,9 @@ def test_repair_joins_several_clips(tmp_path):
     assert abs(media.dur(out) - 6.0) < 0.3
 
 
-def test_person_in_a_real_frame_is_sketched():
+def test_person_in_a_real_frame_is_sketched(monkeypatch):
+    from studio import people as _p
+    monkeypatch.setattr(_p, "_sketchy", lambda: True)   # the sketch style (people_style: "sketch"); photoreal is the default
     from studio import people, imagegen
     assert people.shows_person("An older woman with short grey hair in a gift shop") and not people.shows_person("A white boat at a dock")
     p = imagegen._text_prompt({}, {"vo": "x", "people": [], "person_in_frame": True, "described_prompt": "An older woman in a shop."}, print)

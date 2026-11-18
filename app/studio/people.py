@@ -2,9 +2,9 @@
 
 - Nobody is anonymised. Real source footage of the people in the story is used as it is (commentary on a clip is normal on
   YouTube; the owner's call).
-- A GENERATED picture of a real, named person is drawn as a courtroom sketch artist's drawing (charcoal and pastel, a different
-  angle), never a photo-real look-alike: a photo-real stranger passed off as the person ("a man who bears no resemblance to
-  him") is worse than no picture, and a sketch reads at once as an illustration.
+- A GENERATED picture of a real, named person is PHOTOREALISTIC (owner, 2026-11-17: "can you not ask for a photorealistic
+  image?"), described from the real frame's look so it resembles them; it keeps its GENERATED tag and the YouTube altered-content
+  disclosure. people_style: "sketch" brings back the courtroom-sketch drawing of 2026-11-07.
 - A describer never rebuilds the source's screen layout (split screens, video-call panels, lower thirds): that produced
   strangers in a fake talk-show frame. It describes one real scene.
 - Animation of a picture with people moves the camera, never their mouths (a face mouthing words under the narration).
@@ -34,7 +34,33 @@ _OLD = re.compile(r"(?i)\s*No real or recogni[sz]able people\.?|\s*no real or re
 # a person in a description of a REAL frame (snapshot of the source / your footage): named or not, they are a real person
 PERSON = re.compile(r"(?i)\b(wom[ae]n|m[ae]n|person|people|lady|ladies|gentleman|girl|boy|guest|host|interviewer|speaker|figure|face|"
                     r"portrait|elderly|grey-haired|gray-haired|she|he|her|his|they)\b")
-SNAP_RULE = (f"If the image shows a person, they are a real person: draw them as {SKETCH}; never a photo-real look-alike.")
+# a medium shot with the whole head in frame: a snapshot of only hands was described as "cropped, hair not visible" and Flow drew
+# hands and a tie (Nov 17); the camera moves can't put back a face the picture never had
+PHOTO = ("a photorealistic photograph (natural light, true-to-life skin and clothing, cinematic 35 mm look) that matches their real "
+         "look, seen from a different angle than any photo of them, framed as a medium shot with their whole head and face clearly "
+         "in the picture (never cropped at the face, never only hands or clothing)")
+
+
+def _sketchy():
+    try:
+        from . import config
+        return str(config.load().get("people_style", "photo")).lower() == "sketch"
+    except Exception:
+        return False
+
+
+def style():
+    """How a generated picture shows a real person: photoreal (default since 2026-11-17) or the courtroom sketch."""
+    return SKETCH if _sketchy() else PHOTO
+
+
+def snap_rule():
+    if _sketchy():
+        return f"If the image shows a person, they are a real person: draw them as {SKETCH}; never a photo-real look-alike."
+    return f"If the image shows a person, they are a real person: show them as {PHOTO}."
+
+
+SNAP_RULE = snap_rule   # (callers use people.snap_rule())
 # Meta's animate step re-rendered a charcoal sketch as a photo-real face (Nov 8 smoke test): say it, and check it (mediaroutes)
 KEEP_DRAWN = ("This is a hand-drawn sketch: every frame must stay a hand-drawn charcoal and pastel drawing in exactly this style, "
               "never a photograph or a realistic video.")
@@ -150,16 +176,16 @@ def rule(ppl):
     """The people line for a generator prompt (with each person's look from a real frame, when we have it)."""
     if not ppl: return ""
     who = [f"{p} ({_LOOKS[p]})" if _LOOKS.get(p) else p for p in ppl]
-    return f"Show {', '.join(who)} as {SKETCH}."
+    return f"Show {', '.join(who)} as {style()}."
 
 
 def tail(sec_or_people, photo=True):
-    """What every text-to-image prompt ends with: the sketch rule for named people (or a real person seen in the source frame the
+    """What every text-to-image prompt ends with: the people rule (photoreal, or the sketch) for named people (or a real person seen in the source frame the
     prompt was described from), else photorealistic; never text/logos."""
     ppl = sec_or_people.get("people") if isinstance(sec_or_people, dict) else list(sec_or_people or [])
     if ppl: return " " + rule(ppl) + " No text, no logos."
     if isinstance(sec_or_people, dict) and sec_or_people.get("person_in_frame"):
-        return f" Any person in it is drawn as {SKETCH}. No text, no logos."
+        return f" Any person in it is shown as {style()}. No text, no logos."
     return (" Photorealistic." if photo else "") + " No text, no logos."
 
 

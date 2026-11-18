@@ -56,10 +56,29 @@ class FlowRungTests(unittest.TestCase):
              patch("app.studio.physics.provide", return_value=None), \
              patch("app.studio.graphics.make", return_value={"ok": False, "why": "x", "hard": False}), \
              patch("app.studio.illustrate.aircraft_for", return_value=None), patch("app.studio.illustrate.pick", return_value=None):
-            it = short._v2_rungs({"flow_on": True}, self.sd, {"id": "b1", "vo": "a beat"}, {"key": "b1_0"}, {}, [], {}, {}, vb(),
+            it = short._v2_rungs({"flow_on": True, "slot_pictures": False}, self.sd, {"id": "b1", "vo": "a beat"}, {"key": "b1_0"}, {}, [], {}, {}, vb(),
                                  [], [], [], 0, lambda m: None)
         gen.assert_not_called()
         self.assertEqual(it["rung"], "headline")
+
+
+    def test_a_fresh_ai_picture_comes_before_any_drawing_or_card(self):
+        # owner, 2026-11-17: "worst case we could have made a cloudflare image from description" - the slot's own picture rung
+        img = self.sd / "x.jpg"; img.write_bytes(b"x")
+        with patch("app.studio.imagegen.generate_many", return_value=[(img, "p")]) as gm,              patch("app.studio.imagegen.last_site", return_value="cloudflare"),              patch("app.studio.depth.cutout_layers", return_value=[self.sd / "x_L0.jpg", self.sd / "x_L1.png"]),              patch("app.studio.graphics.make") as gfx:
+            chain = []
+            it = short._v2_rungs({}, self.sd, {"id": "b1", "vo": "a beat"}, {"key": "b1_2"}, {}, [], {}, {}, vb(), chain, [], [], 0, lambda m: None)
+        gfx.assert_not_called()
+        self.assertEqual(it["rung"], "imagegen"); self.assertEqual(it["type"], "layers")
+        self.assertIn("from the narration", chain[-1])
+        self.assertIsNone(gm.call_args.kwargs.get("image"))       # from the narration, not the screenshot again
+
+    def test_when_no_picture_comes_the_reasons_are_kept_for_the_ladder_panel(self):
+        with patch("app.studio.imagegen.generate_many", return_value=[]),              patch("app.studio.imagegen.tries_text", return_value="cloudflare: failed (HTTP 429)"),              patch("app.studio.studio3d.clip", return_value=(None, "no object")),              patch("app.studio.physics.provide", return_value=None),              patch("app.studio.graphics.make", return_value={"ok": False, "why": "x", "hard": False}):
+            why, failed = [], []
+            it = short._v2_rungs({}, self.sd, {"id": "b1", "vo": "a beat"}, {"key": "b1_2"}, {}, [], {}, {}, vb(), [], why, failed, 0, lambda m: None)
+        self.assertEqual(it["rung"], "headline")
+        self.assertIn("AI image: cloudflare: failed (HTTP 429)", why); self.assertIn("imagegen", failed)
 
 
 if __name__ == "__main__":

@@ -14,12 +14,44 @@ from studio import camera_moves as cm  # noqa: E402
 cv2 = pytest.importorskip("cv2")
 
 
-def test_push_goes_from_the_whole_frame_to_about_half_and_stays_inside():
+def test_push_goes_from_the_whole_frame_in_and_stays_inside():
     W, H = 1920, 1080
     ws = cm.windows("push", 60, 2 * W, 2 * H, W, H)
-    assert abs(ws[0][2] - 2 * W) < 1 and abs(ws[-1][2] - 0.52 * 2 * W) < 1
+    # owner, 2026-11-17: no known subject -> at most ~1.4x, centred
+    assert abs(ws[0][2] - 2 * W) < 1 and abs(ws[-1][2] - cm.NO_SUBJECT_MIN * 2 * W) < 1
     for x0, y0, ww, ang in ws:
         assert x0 >= -1e-6 and y0 >= -1e-6 and x0 + ww <= 2 * W + 1e-6 and y0 + ww * H / W <= 2 * H + 1e-6 and ang == 0
+    # a small subject: the push ends near it (tighter than without one), centred on it
+    box = (0.40, 0.30, 0.60, 0.70)
+    ws = cm.windows("push", 60, 2 * W, 2 * H, W, H, box=box)
+    x0, y0, ww, _ = ws[-1]; wh = ww * H / W
+    assert ww < cm.NO_SUBJECT_MIN * 2 * W and abs((x0 + ww / 2) - 0.5 * 2 * W) < 2 and abs((y0 + wh / 2) - 0.5 * 2 * H) < 2
+
+
+def test_no_move_ever_cuts_into_the_subject():
+    """owner, 2026-11-17: 'don't zoom so much that the subject is cropped' - every frame of every move keeps the whole box."""
+    for (W, H, iw, ih) in ((1920, 1080, 3840, 2160), (1080, 1920, int(3840 * 16 / 9), 3840)):
+        for box in ((0.42, 0.25, 0.58, 0.75), (0.30, 0.10, 0.70, 0.95), (0.05, 0.4, 0.25, 0.8)):
+            nd = cm.need(box, iw, ih, W, H)
+            for move in cm.MOVES:
+                if move in ("spin", "whole") or (nd > 1.0 and cm.MOVES[move][2] != "pan"): continue   # spin rotates; a too-wide subject is swept
+                for x0, y0, ww, _ in cm.windows(move, 40, iw, ih, W, H, box=box):
+                    wh = ww * H / W
+                    if nd > 1.0: continue
+                    assert x0 <= box[0] * iw + 1 and x0 + ww >= box[2] * iw - 1, (W, box, move)
+                    assert y0 <= box[1] * ih + 1 and y0 + wh >= box[3] * ih - 1, (W, box, move)
+
+
+def test_a_subject_wider_than_the_frame_is_swept_not_cropped():
+    # two people across a 16:9 picture in a 9:16 Short: no zoom can hold both, and a pan shows only part of them at a time
+    # (owner, 2026-11-17: "his hands and tie") -> the whole picture over a blurred copy, a gentle push that stays inside it
+    assert cm.choose(0, None, 100, -1e9, 0.3, need=1.6) == "whole"
+    assert cm.choose(1, "whole", 100, -1e9, 0.3, need=1.2) == "whole"
+    canvas = cm._whole_canvas(np.full((768, 1376, 3), 200, np.uint8), 1080, 1920)
+    assert canvas.shape == (3840, 2160, 3)
+    for x0, y0, ww, _ in cm.windows("whole", 30, 2160, 3840, 1080, 1920):
+        fw = 2160 * 0.94; assert x0 <= (2160 - fw) / 2 + 1 and x0 + ww >= (2160 + fw) / 2 - 1     # the picture's full width in frame
+    assert cm.choose(0, None, 100, -1e9, 0.3, said=["close", "hold"], need=0.9) not in ("close", "hold")
 
 
 def test_the_moves_ease_and_the_spin_turns_nine_degrees():

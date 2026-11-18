@@ -11,7 +11,9 @@ DEFAULTS = {
     "speaker_inset": True,            # a beat naming a person shows the real source frame as an inset over its other shots (people.py)
     "editorial_attempts": 5,          # editorial review (our analysis + a joke per beat): regenerate with feedback up to this many times
     "source_clips_auto": True,        # Source Clip rung: when the script asked for none, match the beat to a caption cue (2.5 s clip)
-    "flow_on": True,                  # Google Flow rung (flow.py): skipped by itself until scripts\flow-login.ps1 has been run once
+    "flow_on": False,                 # Google Flow (stills r14, clips r8 / flow.py): OFF - Google flags automated use of Flow and it puts
+                                      # the account at risk (owner, 2026-11-17). Stays in the ladder, always skipped; Flow assets are made
+                                      # by hand in the Flow video factory, never by automation here.
     "flow_profile": "",               # Chrome profile for Flow ("" = <jobs_dir parent>\flow_profile)
     "flow_url": "https://labs.google/fx/tools/flow",
     "flow_timeout": 480,              # seconds to wait for one generated clip (Flow queues at busy times)
@@ -82,7 +84,10 @@ DEFAULTS = {
     "jobs_dir": r"F:\videos\video_studio\jobs",   # outputs stay on F:\videos
     "vet_provider": "local",          # stock-clip vetting: local (Ollama vision) | zai | claude | off
     "vet_model": "qwen2.5vl:7b",
-    "camera_moves": "framed",         # stills: "framed" = big sharp pre-rendered moves (push/pan/dolly/spin, dissolves; studio/camera_moves.py),
+    "camera_moves": "framed",
+    # how a GENERATED picture shows a real, named person: "photo" (owner, 2026-11-17) or "sketch" (courtroom drawing, 2026-11-07)
+    "people_style": "photo",         # stills: "framed" = big sharp pre-rendered moves (push/pan/dolly/spin, dissolves; studio/camera_moves.py),
+    "skip_faceless_source": True,     # Shorts: a source clip with people but no face in it (hands / torsos) gives way to a picture (owner, 2026-11-17)
                                       # "legacy" = the old small CSS zoom/parallax in Remotion (owner made framed the default, 2026-11-16).
     "short_concurrency": "auto",      # Remotion workers: auto = by free RAM (2/4/6); a number overrides (studio/short.py)
     "remotion_headless_shell": True,  # render in Remotion's headless Chrome (2x faster, Nov 8); the installed Chrome is the fallback

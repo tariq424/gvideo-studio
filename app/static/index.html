@@ -27,6 +27,10 @@ pre{background:var(--inset);border:1px solid var(--line);border-radius:8px;paddi
 .mk-ai{background:#e8912d}.mk-stock{background:#3b82f6}.mk-photo{background:#10b981}.mk-card{background:#9ca3af}.mk-blur{background:#a78bfa}.mk-trip{background:#14b8a6}
 .sc-bns{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}.sc-bn{padding:2px 6px;font-size:12px;min-width:28px;line-height:16px}
 .sc-bn.cur{background:var(--acc);color:#111;border-color:var(--acc);font-weight:700}.sc-bn.off{opacity:.5}.sc-bn .mk-dot{width:6px;height:6px;margin:0 0 0 2px}
+.sc-wrap{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}.sc-main{flex:1 1 420px;min-width:0}
+.sc-lad{flex:0 1 300px;max-height:220px;overflow:auto;font-size:12.5px;line-height:1.35;border:1px solid var(--line);border-radius:8px;padding:6px 8px;box-sizing:border-box}
+.lad-h{font-weight:700;margin-bottom:4px}.lad-slot{margin:4px 0 6px}.lad-n{font-weight:600;font-size:12px;opacity:.8}
+.lad-f{color:#c0392b;margin-left:6px}.lad-ok{color:#1e8449;margin-left:6px}
 .sc-key{font-size:11.5px;margin-top:3px}.sc-key span{display:inline-block;width:10px;height:7px;border-radius:2px;margin:0 3px 0 8px}
 .mk-dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 4px 0 2px;vertical-align:middle}
 .sec-edit{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.sec-edit input{font-weight:600}
@@ -458,6 +462,9 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <button class="sec ${tgt=='short'?'on':''}" data-testid="scrub-pick-short" aria-pressed="${tgt=='short'}" ${has('short')&&!d.busy?'':'disabled'} onclick="${tgt=='short'?'':"edTarget('short')"}">Short</button>
   <button class="sec ${tgt!='short'?'on':''}" data-testid="scrub-pick-long" aria-pressed="${tgt!='short'}" ${has('long')&&!d.busy?'':'disabled'} onclick="${tgt!='short'?'':"edTarget('long')"}">Explainer</button></div>`;
  h+=`<div id="scr_vo" data-testid="scrub-vo" class="scr-vo" hidden></div>`;
+ // owner, 2026-11-17: how the picture was made sits ABOVE the scrubber; the ladder (what failed, what fired) in a panel beside it
+ h+=`<div id="scr_rung" data-testid="scrub-rung" class="src-note" style="font-weight:600;white-space:pre-line" hidden></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div>`;
+ h+=`<div class="sc-wrap"><div class="sc-main">`;
  h+=`<input type="range" id="scr_r" data-testid="scrub-range" aria-label="Scrub the video" min="0" max="${D.toFixed(2)}" step="0.05" value="${(v.currentTime||0).toFixed(2)}" oninput="scSeek(this.value)" style="width:100%;margin:0">`;
  if(D>0&&ED.beats.length){const W=(el.clientWidth||900)-24;   // owner, Nov 10: beat numbers you can read and click; each stretch's rung marked under them
   h+=`<div class="sc-strip">${ED.beats.map(b=>{const px=b.dur/D*W,lab=ED.kind=='short'?(b.label||'').replace(/^Beat /,''):String(b.n||b.id);
@@ -469,7 +476,7 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <button class="sec" data-testid="scrub-play" onclick="$('ov').play()">▶ Play</button><button class="sec" data-testid="scrub-stop" onclick="$('ov').pause()">■ Stop</button>
   <span data-testid="scrub-time" id="scr_t" style="font-variant-numeric:tabular-nums;font-weight:600">0:00.0</span><span class="mut" style="font-size:13px">/ ${fmtTs(D)}</span>
   <span data-testid="scrub-beat" id="scr_b" class="rv-badge">—</span>
-  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div><div id="scr_rung" data-testid="scrub-rung" class="src-note" style="font-weight:600;white-space:pre-line" hidden></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div></div>`;
+  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div></div><aside id="scr_lad" class="sc-lad" data-testid="scrub-ladder" aria-label="Visual ladder for this beat"></aside></div></div>`;
  el.innerHTML=h;scTick()}
 // ---- how each stretch's picture was made (owner, 2026-11-10: "I don't see the source of the clip, e.g. stock video or the rung")
 const RUNGN={ai_image:'AI image',chatgpt_chain:'ChatGPT image chain',static_image:'still image',card:'headline card',meta_chain:'Meta image → video',flow:'Google Flow video'};
@@ -485,6 +492,13 @@ function stMore(s){const pr=String(s.provider||'').toLowerCase(),d=String(s.deta
  return[svc&&'service: '+svc,mo&&'motion: '+mo,d&&!svc&&d,s.prompt&&'prompt: “'+s.prompt+'”'].filter(Boolean).join(' · ')}
 function stList(bt){const ss=bt.stretches||[];if(!ss.length)return'';
  return`<div class="src-note" data-testid="edit-stretches"><b>Pictures in this beat</b><ul style="margin:4px 0 0 18px;padding:0">${ss.map(s=>`<li><a href="#" onclick="scSeek(${((bt.start||0)+s.a+0.05).toFixed(2)});return false">${fmtT((bt.start||0)+s.a)}–${fmtT((bt.start||0)+s.b)}</a> <span class="mk-dot mk-${stKind(s)}"></span>${esc(stName(s))}${s.credit&&s.credit!=s.how?' · '+esc(s.credit):''}${s.fix?' · fixed from the defect report ('+esc(s.fix)+')':''}${stMore(s)?`<br><span class="mut" style="font-size:12px">${esc(stMore(s))}</span>`:''}</li>`).join('')}</ul></div>`}
+// the visual ladder of the beat under the playhead: per picture slot, each rung that failed and why, then the one that fired
+function ladHtml(b){if(!b)return`<div class="mut">Scrub to a beat to see its visual ladder.</div>`;const L=b.ladder||[];
+ let h=`<div class="lad-h">${esc(b.label)} · visual ladder</div>`;if(!L.length)return h+`<div class="mut">No ladder record for this beat (your footage, or made before records were kept).</div>`;
+ for(const sl of L){h+=`<div class="lad-slot"><div class="lad-n">Picture ${esc(String(sl.slot).replace(/^#/,''))}</div>`;
+  for(const [r,why] of (sl.failed||[]))h+=`<div class="lad-f"><b>Failed:</b> ${r?esc(r)+': ':''}${esc(why)}</div>`;
+  h+=sl.used?`<div class="lad-ok"><b>Fired:</b> ${esc(sl.used)}</div>`:`<div class="lad-f"><b>Nothing fired</b></div>`;h+=`</div>`}
+ return h}
 function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
 function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.currentTime||0;
  if(document.activeElement!==r)r.value=t.toFixed(2);if(isFinite(v.duration)&&+r.max<v.duration)r.max=v.duration.toFixed(2);
@@ -494,6 +508,7 @@ function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.curren
  const rg=$('scr_rung');if(rg){const s=b&&(b.stretches||[]).find(x=>t-b.start>=x.a&&t-b.start<x.b);const rs=(b&&b.rungs)||[];
   const txt=s?`Made by: ${stName(s)}${s.credit&&s.credit!=s.how?' · '+s.credit:''} (${fmtT(b.start+s.a)}–${fmtT(b.start+s.b)})${stMore(s)?'\n'+stMore(s):''}`:b&&b.stretches&&/Soundbite|commentary/.test(b.label)?'Made by: your footage, as filmed':rs.length?`Made by: ${rs.join(' · ')}`:'';
   rg.hidden=!txt;rg.textContent=txt}
+ const ld=$('scr_lad');if(ld&&ld.dataset.beat!==(b?b.id:'')){ld.dataset.beat=b?b.id:'';ld.innerHTML=ladHtml(b)}
  $('scr_b').textContent=b?(b.label+(ED.kind!='short'?' · '+b.id:'')+(b.editable?'':' (not editable)')):(ED.beats.length?'between beats':'beats not loaded');
  $('scr_b').dataset.beat=b?b.id:'';
  const e=$('scr_e');e.disabled=!(b&&b.editable)||!!busy||!v.paused;e.title=!v.paused?'Stop the video first':busy?String(busy):'';

@@ -130,7 +130,7 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     ppl = people.names(sec.get("vo", ""), ents)
     if people.rebuilds_layout(prompt):   # a split screen / video call of strangers is not a scene (owner, 2026-11-07)
         log("  chain: the description rebuilds the show's screen layout, not a scene; next rung"); txt.unlink(missing_ok=True); return None
-    prompt = people.scrub(prompt) + (" " + people.rule(ppl) if ppl else (" " + people.SNAP_RULE if people.shows_person(prompt) else ""))
+    prompt = people.scrub(prompt) + (" " + people.rule(ppl) if ppl else (" " + people.snap_rule() if people.shows_person(prompt) else ""))
     r = run(cfg, "r13", prompt, aspect, vid, log, timeout=600)
     if not r or not media.ok(vid): return None
     src_img = routes_dir(cfg) / "output" / "r13_meta_chain.jpg"   # the image Meta animated (saved by the route)
@@ -153,7 +153,7 @@ def _keep_drawn(cfg, d, key, vid, img, log, res):
     clip is dropped and the drawn still is used instead (it still gets the gentle camera move). -> res"""
     from . import media, people
     _sent(cfg, d, key)
-    if not cfg.get("keep_drawn_check", True) or not img or not Path(img).is_file() or not media.ok(vid): return res
+    if not people._sketchy() or not cfg.get("keep_drawn_check", True) or not img or not Path(img).is_file() or not media.ok(vid): return res
     if people.is_drawing(cfg, img) is not True: return res
     frame = d / f"{key}_mid.jpg"
     try:

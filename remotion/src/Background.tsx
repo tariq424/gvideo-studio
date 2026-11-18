@@ -18,24 +18,41 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = (props) => 
   return (
     <AbsoluteFill>
       <ShotInner {...props} />
-      {inset?.src ? <Inset src={inset.src} dur={props.dur} /> : null}
+      {inset?.src ? <Inset inset={inset} dur={props.dur} /> : null}
     </AbsoluteFill>
   );
 };
 
 // Speaker inset (owner, 2026-11-07; app/studio/people.py): the real source frame of the person the beat talks about, in a small
 // gold-edged box at the top right over a map, graphic or generated shot, with a slow push-in. Graphics draw above it.
-const Inset: React.FC<{ src: string; dur: number }> = ({ src, dur }) => {
+// owner, 2026-11-17 (app/studio/reframe.py): the speaker's own clip PLAYING (muted), zoomed on the face (x, y, zoom); a frame with
+// no face is no inset at all.
+const Inset: React.FC<{ inset: any; dur: number }> = ({ inset, dur }) => {
   const f = useCurrentFrame(); const { fps, width, height } = useVideoConfig(); const t = f / fps;
+  const src: string = inset.src;
   const tall = height > width;
   const w = Math.round(width * (tall ? 0.42 : 0.28));
   const a = interpolate(t, [0, 0.35], [0, 1], { extrapolateRight: "clamp" });
-  const z = interpolate(t, [0, Math.max(dur, 0.1)], [1.0, 1.08]);
+  const z0 = inset.zoom ?? 1.0;
+  const z = interpolate(t, [0, Math.max(dur, 0.1)], [z0, z0 * 1.06]);
+  const at = inset.x != null ? `${(inset.x * 100).toFixed(1)}% ${(inset.y * 100).toFixed(1)}%` : "50% 50%";
+  const look: React.CSSProperties = { width: "100%", height: "100%", objectFit: "cover", objectPosition: at, transformOrigin: at, transform: `scale(${z})` };
+  if (inset.video) {
+    return (
+      <div style={{ position: "absolute", top: tall ? 170 : 60, right: tall ? 36 : 60, width: w, height: Math.round((w * 9) / 16), overflow: "hidden",
+        borderRadius: 18, border: "4px solid #ffc83d", boxShadow: "0 18px 50px rgba(0,0,0,0.65)", opacity: a, background: "#000",
+        transform: `translateY(${(1 - a) * -16}px)` }}>
+        <Loop durationInFrames={Math.max(1, Math.round((inset.loop || 8) * fps))} layout="none">
+          <OffthreadVideo src={asset(src)} muted style={look} {...({ onError: mediaError(src) } as any)} />
+        </Loop>
+      </div>
+    );
+  }
   return (
     <div style={{ position: "absolute", top: tall ? 170 : 60, right: tall ? 36 : 60, width: w, height: Math.round((w * 9) / 16), overflow: "hidden",
       borderRadius: 18, border: "4px solid #ffc83d", boxShadow: "0 18px 50px rgba(0,0,0,0.65)", opacity: a, background: "#000",
       transform: `translateY(${(1 - a) * -16}px)` }}>
-      <Img src={asset(src)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
+      <Img src={asset(src)} style={look} />
     </div>
   );
 };
@@ -113,6 +130,14 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
     );
   }
   if (bg.type === "layers") return <LayersBackdrop layers={bg.layers} dur={dur} seed={seed} />;
+  if (bg.type === "video" && (bg as any).seq?.length) {
+    // two subjects apart (app/studio/reframe.py, owner 2026-11-17): the whole frame first, then a hard cut to each subject in
+    // turn, centred - the clip keeps playing through the cuts
+    const seq = (bg as any).seq; const n = seq.length;
+    const i = Math.min(n - 1, Math.floor(t / (Math.max(dur, 0.1) / n)));
+    const { seq: _drop, fit: _f, pos: _p, ...rest } = bg as any;
+    return <ShotInner bg={{ ...rest, ...seq[i] } as Bg} dur={dur} seed={seed} />;
+  }
   if (bg.type === "video" && bg.fit === "frame") {
     // landscape clip shown whole, over a blurred enlarged copy of itself
     const z = zz(1.0, 1.03);
@@ -129,9 +154,12 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
   }
   if (bg.type === "video") {
     const z = zz(1.0, 1.04);   // gentle: every % of zoom softens the picture
+    // pos (app/studio/camera_moves.py reframe): where the crop sits across a wide clip in a tall frame - on the faces, not the middle
+    const pos = (bg as any).pos;
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden" }}>
-        <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
+        <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: pos != null ? `${(pos * 100).toFixed(1)}% 50%` : undefined,
+          transformOrigin: pos != null ? `${(pos * 100).toFixed(1)}% 50%` : undefined, transform: `scale(${z})` }} />
         <AbsoluteFill style={{ background: shade }} />
       </AbsoluteFill>
     );
