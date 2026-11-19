@@ -31,6 +31,11 @@
 - Pictures: broll 2 h, stills 2 h (Cloudflare + Hugging Face free quotas exhausted, so ChatGPT made every still, ~60 s each).
 
 **Next (owner-approved order)**
+0. (after reboot) Own voices: see CLAUDE_VOXCPM2_HANDOFF.md (American Accent works; Original Accent crashes in VoxCPM2 load).
+   Render-worker benchmark so far (job 20261119_061158, 1080p, frames 30000+): 2 workers = 119 frames/min and +8.5 GB RAM,
+   mostly Remotion's OffthreadVideo frame cache, which by default grows into free RAM. Plan: pass
+   --offthreadvideo-cache-size-in-bytes (about 2 GB) and size workers by CPU (8 on 16 threads), checked against that capped need;
+   rerun the 2-vs-6 benchmark on a clean boot first.
 1. Render workers: size them by what the render needs, not by free RAM with desktop apps open; log + warn the owner
    when resources are low.
 2. Length: "Auto" = 15 min suggested; the slider gets the same checkbox; the video at least fills the chosen length, no cap.
