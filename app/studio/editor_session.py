@@ -25,13 +25,20 @@ def reservation_path(namespace=None):
 def _write(data, namespace=None):
     p = reservation_path(namespace)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
+    # a temp name of its own per writer: two writers sharing one ".tmp" raced (2026-11-19: job 20261119_061158 crashed on
+    # WinError 32/2 when the server and a job thread cleared the reservation at the same moment); Windows may hold the
+    # target open for a reader a moment, so the swap is retried
+    import threading, uuid
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:6]}.tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    try:
-        os.replace(tmp, p)
-    except PermissionError:
-        time.sleep(0.05)
-        os.replace(tmp, p)
+    for i in range(20):
+        try:
+            os.replace(tmp, p); return
+        except PermissionError:
+            time.sleep(0.05 * (i + 1))
+    try: tmp.unlink()
+    except OSError: pass
+    raise PermissionError(f"could not update {p} (held open by another process)")
 
 def _pid_alive(pid):
     """Is that process alive? NEVER os.kill(pid, 0) on Windows: Python maps it to TerminateProcess (it would kill the
@@ -69,12 +76,10 @@ def _read(namespace=None):
     if not isinstance(data, dict):
         return None
 
-    if not _pid_alive(data.get("pid")):
-        _write({}, namespace)
-        return None
-
-    if int(data.get("active_applies", 0)) == 0 and time.time() - float(data.get("last_activity", time.time())) > IDLE_LIMIT:
-        _write({}, namespace)
+    if not _pid_alive(data.get("pid")) or (int(data.get("active_applies", 0)) == 0 and
+                                          time.time() - float(data.get("last_activity", time.time())) > IDLE_LIMIT):
+        try: _write({}, namespace)   # clearing a stale reservation is housekeeping: a race here must never fail a job
+        except OSError: pass
         return None
 
     return data

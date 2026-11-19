@@ -34,8 +34,8 @@ VOICE_MENU = {
     "am_michael": {"sound": "steady, authoritative male", "for": "politics, world news, diplomacy, current affairs", "pace": 1.00},
     "am_fenrir": {"sound": "deep, grave male", "for": "war, conflict, disasters, crime, investigations", "pace": 1.334},
     "am_puck": {"sound": "lively, playful male", "for": "comedy, satire, pop culture, sports, entertainment", "pace": 1.381},
-    "af_heart": {"sound": "warm, clear female", "for": "science, health, human interest, education, nature", "pace": 1.073},
-    "af_bella": {"sound": "bright, energetic female", "for": "technology, AI, startups, business, the future", "pace": 1.072},
+    "af_heart": {"sound": "warm, rich female", "for": "science, technology, AI, the future, health, human interest, education, nature", "pace": 1.073},
+    "af_bella": {"sound": "bright, light female (thin low end)", "for": "lifestyle, travel, upbeat consumer topics", "pace": 1.072},
     "af_sarah": {"sound": "calm, measured female", "for": "finance, economy, history, explainers", "pace": 1.095},
 }
 PICK = """Pick the narrator voice that best suits this video's subject and tone. Voices:

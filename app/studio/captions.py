@@ -18,6 +18,11 @@ def _whisper():
         _model = WhisperModel("small.en", device="cpu", compute_type="int8")
     return _model
 
+def release():
+    """Drop the cached Whisper model (owner, 2026-11-19: no model stays loaded after use); the next job loads it again."""
+    global _model
+    _model = None
+
 def word_times(wav, script_text):
     """Return [(word, start, end)] for every script word (times relative to the wav)."""
     segs, _ = _whisper().transcribe(str(wav), language="en", word_timestamps=True, vad_filter=False, beam_size=1)

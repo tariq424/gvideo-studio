@@ -430,6 +430,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         plan = normalize(plan)
         punch_up_long(cfg, plan, log, stop)
         plan = normalize(plan)
+        plan = fresh_hook(llm, plan, log)   # owner, 2026-11-19: the opening line must not repeat a later one
         w = sum(_nw(s["vo"]) for s in plan["sections"])
         tk = f" Tokens in/out: {llm.tokens_in}/{llm.tokens_out}" if llm.tokens_in else ""
         log(f"Script ready: {len(plan['sections'])} sections, {w} words (~{w / cfg['wpm']:.1f} min), "
@@ -938,7 +939,7 @@ def research_commentary(llm, cfg, title, vo, log, kind="long", sid=""):
     n = 60 if kind == "long" else 24
     q = str(llm.trace(f"research q {sid}").chat_json("You write precise web search queries. Reply with JSON only.",
             RESEARCH_Q.format(title=str(title).replace('"', "'"), vo=vo.replace('"', "'")[:1500]), max_tokens=100)["query"]).strip()
-    snips, route = websearch.light(cfg, q, log)
+    snips, route = websearch.light(cfg, q, log, llm=llm)
     if not snips:
         log(f"  research {sid}: nothing found for \"{q}\""); return ""
     research = "\n".join("- " + x[:500] for x in snips[:4])
@@ -1034,4 +1035,67 @@ def punch_up_long(cfg, plan, log, stop=None):
     nc = sum(1 for s in plan["sections"] if s.get("commentary"))
     log(f"Explainer voice: {takes} of {n} sections got our take, {jokes} jokes added ({nc} with researched commentary; "
         "summary first, commentary second, punch-up last)")
+    return plan
+
+
+# ---------------------------------------------------------------- the hook is its own line (owner, 2026-11-19)
+# "Do we still have a hook? did not seem like it": the opening sentence was the same claim the narration makes again later
+# (word for word at 5:19), so it played as a repeat, not a hook. The first sentence may tease what is coming - never say it.
+HOOK_SAME = 0.5
+FRESH_HOOK = """This is the first sentence of a video, its cold-open hook:
+"{hook}"
+It repeats this line that the narration says later:
+"{later}"
+Rewrite ONLY the hook: one sentence of 8-25 words that makes the viewer need to keep watching - the stakes, a sharp question or
+a surprising consequence - drawn from the video's subject ("{title}") but worded so it repeats NO later sentence. No recap, no
+"In this video", no host introduction, no number or claim that isn't in the narration below.
+Narration (for facts only):
+{body}
+Reply with JSON: {{"hook": "..."}}"""
+
+
+def _content(s):
+    stop = {"the", "a", "an", "to", "of", "and", "or", "in", "on", "with", "for", "is", "are", "be", "could", "would", "that",
+            "this", "it", "its", "by", "as", "at", "from", "first", "every", "into"}
+    return {w for w in re.findall(r"[a-z0-9']+", s.lower()) if w not in stop and len(w) > 2}
+
+
+def hook_repeat(plan):
+    """-> (hook sentence, the later sentence it repeats) or None. Overlap = shared content words / the hook's content words."""
+    secs = plan.get("sections") or []
+    if not secs: return None
+    ss = _sentences(secs[0].get("vo") or "")
+    if not ss: return None
+    hook = ss[0]; hw = _content(hook)
+    if len(hw) < 3: return None
+    later = ss[1:] + [x for s in secs[1:] for x in _sentences(s.get("vo") or "")]
+    best = max(later, key=lambda x: len(hw & _content(x)) / len(hw), default=None)
+    if best and len(hw & _content(best)) / len(hw) >= HOOK_SAME: return hook, best
+    return None
+
+
+def fresh_hook(llm, plan, log, tries=3):
+    """The opening sentence repeats a later line -> it is rewritten into a fresh hook (the later line keeps its place)."""
+    rep = hook_repeat(plan)
+    if not rep: return plan
+    hook, later = rep
+    body = " ".join(s.get("vo") or "" for s in plan["sections"])[:12000]
+    def chk(j):
+        h = str(j.get("hook") or "").strip()
+        if not 6 <= _nw(h) <= 30: raise ValueError("the hook must be 8-25 words")
+        test = deepcopy(plan); test["sections"][0]["vo"] = h + " " + " ".join(_sentences(test["sections"][0]["vo"])[1:])
+        r = hook_repeat(test)
+        if r: raise ValueError(f'the new hook still repeats a later line: "{r[1][:120]}"')
+        bad = _nums(h) - _nums(body)
+        if bad: raise ValueError(f"numbers not in the narration: {sorted(bad)}")
+    try:
+        j = llm.trace("fresh hook").chat_json("You write cold-open hooks for video essays. Reply with JSON only.",
+            FRESH_HOOK.format(hook=hook.replace('"', "'"), later=later.replace('"', "'"), title=str(plan.get("title") or "").replace('"', "'"),
+                              body=body.replace('"', "'")), max_tokens=200, check=chk)
+    except Exception as e:
+        log(f"  hook repeats a later line and no fresh one was found ({str(e)[:120]}); kept"); return plan
+    new = str((j or {}).get("hook") or "").strip() if isinstance(j, dict) else ""
+    if not new: return plan
+    s0 = plan["sections"][0]; s0["vo"] = new + " " + " ".join(_sentences(s0["vo"])[1:])
+    log(f'  hook rewritten (it repeated "{later[:80]}"): {new}')
     return plan

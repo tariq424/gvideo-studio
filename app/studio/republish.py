@@ -167,6 +167,10 @@ def process(cfg, job_dir, log=None):
                     raise
                 say(f"replacing the {kind} on {ch} (old {old.get('video_id')}); the old one stays until you delete it")
                 t = _wait(cfg, tid); r = t.get("result") or {}
+                if t.get("status") != "complete" and "existing draft" in str(t.get("error") or ""):
+                    # the new upload stopped part-way and sits in Studio as a draft: a blind retry would upload a third copy
+                    raise Blocked(f"{kind} on {ch}: the new upload was left as a Studio draft ({str(t.get('error'))[:120]}); "
+                                  "finish or delete that draft in YouTube Studio, then save the video again")
                 if t.get("status") != "complete":
                     raise RuntimeError(f"{kind} on {ch}: {t.get('status')} {str(t.get('error') or '')[:150]}")
                 entry = {"channel": ch, "kind": kind, "url": r.get("url"), "video_id": r.get("video_id"),
@@ -243,3 +247,65 @@ def sweep(jobs_dir):
             if not s.get("republish_req"): _save_state(d, republish_req=time.time())
             queue(d, delay=240 + 60 * n); n += 1
     return n
+
+
+# ---------------------------------------------------------------- any change, not only the editor's Save
+# owner, 2026-11-19: "when a video is updated, the newsroom and the scheduler get the modified video" - also when it was
+# changed outside the editor (a patch, a splice, a re-cut). Every WATCH seconds (and at server start) a finished job whose
+# video file is newer than its YouTube upload, or differs from Newsroom's staged copy, gets the same Save & replace.
+WATCH = 10 * 60
+QUIET = 5 * 60   # a file still being written is left alone until it has been quiet this long
+_watch_thread = None
+
+
+def _sig(outs):
+    return {k: [f.stat().st_size, int(f.stat().st_mtime)] for k, f in outs.items()}
+
+
+def changed(cfg, job_dir, published, now=None):
+    """-> why this finished job's published / staged copies are out of date ("" when they aren't, or it isn't time yet)."""
+    now = now or time.time(); st = _state(job_dir)
+    outs = dict(ym.outputs(job_dir))
+    if not outs or st.get("republish_req"): return ""
+    if any(now - f.stat().st_mtime < QUIET for f in outs.values()): return ""
+    if st.get("republish_auto") == _sig(outs): return ""   # already handled (or blocked / given up) for exactly these files
+    why = []
+    todo, _ = plan(job_dir, published)
+    why += [f"{k} on {ch} is older than the file" for ch, ks in todo.items() for k in ks]
+    stg = Path(str(cfg.get("newsroom_staging") or "F:/videos/newsroom/staging")) / Path(job_dir).name / "output"
+    for k, f in outs.items():
+        s = stg / f.name
+        if s.is_file() and s.stat().st_size != f.stat().st_size: why.append(f"Newsroom's staged {k} differs")
+    return "; ".join(why)
+
+
+def watch_once(cfg, jobs_dir, editing=None, log=print):
+    """One pass: queue a Save & replace for every changed finished job. `editing` -> the job id an editor holds (skipped:
+    its own Save does this). -> the job ids queued."""
+    if not cfg.get("republish_on", True) or not cfg.get("republish_watch", True): return []
+    try: published = ym._http(cfg, "/api/published")
+    except Exception: published = []   # Publisher down: Newsroom's staged copies are still checked
+    held = editing() if editing else None; out = []
+    for d in sorted(Path(jobs_dir).iterdir()) if Path(jobs_dir).is_dir() else []:
+        if not (d / "state.json").is_file() or d.name == held or str(d) in _due: continue
+        try: why = changed(cfg, d, published)
+        except (OSError, ValueError): continue
+        if not why: continue
+        _save_state(d, republish_auto=_sig(dict(ym.outputs(d))))
+        _say(d, None)(f"the video changed outside the editor ({why}); replacing its published copies")
+        if log: log(f"Replace published: {d.name} changed ({why}); queued")
+        _save_state(d, republish_req=time.time()); queue(d, delay=60); out.append(d.name)
+    return out
+
+
+def watch(jobs_dir_fn, editing=None, every=WATCH):
+    """Server start: the watcher runs once now, then every `every` seconds, in the background."""
+    global _watch_thread
+    if _watch_thread and _watch_thread.is_alive(): return
+    def run():
+        from . import config
+        while True:
+            try: watch_once(config.load(), jobs_dir_fn(), editing)
+            except Exception as e: print(f"Replace published watcher: {type(e).__name__}: {str(e)[:200]}", flush=True)
+            time.sleep(every)
+    _watch_thread = threading.Thread(target=run, name="republish-watch", daemon=True); _watch_thread.start()

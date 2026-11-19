@@ -409,6 +409,10 @@ class Studio:
                 try:   # a job never leaves an on-demand WanGP holding VRAM (error, cancel or success)
                     from . import wangp as _wangp; _wangp.release(print, "job ended")
                 except Exception: pass
+                try:   # owner, 2026-11-19: models never stay loaded after use (captions Whisper, depth, background removal)
+                    from . import captions as _cap, depth as _depth
+                    _cap.release(); _depth.release(); import gc; gc.collect()
+                except Exception: pass
                 try:
                     gpu_lock.release()
                 except Exception:

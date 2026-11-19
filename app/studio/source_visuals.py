@@ -194,8 +194,10 @@ def _extract(job, req, dest, meta, log):
         cues = json.loads((job / "src" / "source_cues.json").read_text(encoding="utf-8"))
         if not any(abs(float(c["start"]) - start) < 0.01 for c in cues):
             raise ValueError("timestamp is not in the verified source cues")
-        source = _download_range(url, start, duration, dest)
-        start = 0  # remote media is already a bounded range
+        pad = WIDE if req["kind"] == "clip" else 0.0   # room to move a badly framed excerpt (owner, 2026-11-19)
+        w0 = max(0.0, start - pad)
+        source = _download_range(url, w0, duration + (start - w0) + pad, dest)
+        start = start - w0  # remote media is a bounded range around the cue
     if req["kind"] == "screenshot":
         media.ff("-ss", start, "-i", source, "-frames:v", 1, "-an", dest, timeout=120)
         from PIL import Image
@@ -204,12 +206,53 @@ def _extract(job, req, dest, meta, log):
     else:
         media.ff("-ss", start, "-i", source, "-t", duration, "-an", "-vf", "fps=30,scale=960:-2",
                  "-c:v", "libx264", "-crf", 20, "-pix_fmt", "yuv420p", dest, timeout=120)
+        total = inspect_video(local)["duration"] if source == local else float(inspect_video(source).get("duration") or 0)
+        start0 = start
+        try: start = _best_framed(source, start, duration, dest, total, req, log)
+        except ValueError:
+            if source != local: source.unlink(missing_ok=True)
+            raise
+        if start != start0: req["start"] = round(req["start"] + start - start0, 2)
         info = inspect_video(dest)
         if info["duration"] < 1.95 or info["duration"] > duration + 0.2:
             raise ValueError(f"source excerpt came out {info['duration']:.1f}s, wanted {duration:.1f}s")
     if source != local:
         source.unlink(missing_ok=True)
     log(f"  source evidence: {req['kind']} at {req['start']:.2f}s; {req['purpose'][:90]}")
+
+
+SHIFTS = (3.0, -3.0, 6.0, -6.0, 10.0, -10.0)
+WIDE = 10.0   # seconds downloaded either side of a remote excerpt, so it can move
+
+
+def _best_framed(local, start, duration, dest, total, req, log):
+    """owner, 2026-11-19: an excerpt with no whole face in most frames (a camera mid-move: hands and black, a body with the
+    face cut off) is moved to the nearest well-framed moment within 10 s. When none is framed but nearby footage does show
+    faces, the excerpt is refused (the ladder goes on). Footage with no faces anywhere (slides, a demo) is kept as it is.
+    -> the start used."""
+    from . import reframe
+    try: score = reframe.framing(dest)
+    except Exception: return start
+    if score >= reframe.FRAMED_OK: return start
+    best = (score, start); tmp = dest.with_name(dest.stem + "_try" + dest.suffix)
+    try:
+        for d in SHIFTS:
+            s2 = start + d
+            if s2 < 0 or s2 + min(duration, 2.0) > total: continue
+            media.ff("-ss", s2, "-i", local, "-t", min(duration, total - s2), "-an", "-vf", "fps=30,scale=960:-2",
+                     "-c:v", "libx264", "-crf", 20, "-pix_fmt", "yuv420p", tmp, timeout=120)
+            sc = reframe.framing(tmp)
+            if sc > best[0]:
+                best = (sc, s2); tmp.replace(dest)
+            if sc >= reframe.FRAMED_OK: break
+    finally:
+        tmp.unlink(missing_ok=True)
+    sc, s2 = best
+    if 0 < sc < reframe.FRAMED_MIN:   # faces nearby, none framed
+        raise ValueError(f"no well-framed moment near {start:.1f}s (best {sc:.0%} of frames show a whole face)")
+    if s2 != start:
+        log(f"  source excerpt moved {s2 - start:+.0f}s to a well-framed moment (whole face in {sc:.0%} of frames, was {score:.0%})")
+    return s2
 
 
 def clip_secs(cfg):

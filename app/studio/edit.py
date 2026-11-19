@@ -378,7 +378,7 @@ def _vis_source(v):
 RUNG_NAMES = {"own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "source": "Source clip", "imagegen": "AI image",
               "meta chain": "Meta image → video (from a snapshot)", "meta video": "Meta video", "flow": "Google Flow video",
               "blender": "Blender scene", "studio3d": "3D studio render", "still": "WanGP still", "animate": "WanGP animation", "parallax": "AI still + parallax",
-              "simulation": "Physics simulation", "graphics": "Remotion graphics", "headline": "Headline card", "map": "Map",
+              "simulation": "Physics simulation", "graphics": "Remotion graphics", "hyperframes": "HyperFrames motion graphic", "headline": "Headline card", "map": "Map",
               "cloud": "Cloud still", "reconstruction": "3D reconstruction", "illustration": "Illustration", "silhouette": "Silhouette"}
 SITES = {"cloudflare": "Cloudflare", "hf": "Hugging Face", "chatgpt": "ChatGPT", "bing": "Bing", "meta": "Meta", "gemini": "Gemini"}
 
@@ -401,6 +401,7 @@ def rung_label(it):
     if rung == "meta video" or (tag.endswith("· META") and it.get("type") == "video"): return "Meta video"
     if rung == "simulation" or tag in ("SIMULATION", "SYNTHETIC") or src.endswith("_physics.mp4"):
         return "Physics simulation" + (" (synthetic data)" if tag == "SYNTHETIC" or g.get("synthetic") else "")
+    if rung == "hyperframes" or "hyperframes_" in src: return "HyperFrames motion graphic"
     if rung == "graphics" or tag == "GRAPHICS" or "graphics/" in src: return "Remotion graphics"
     if rung == "headline" or g.get("kind") == "headline": return "Headline card"
     if rung == "map" or g.get("kind") in ("map", "route", "simmap"): return "Map"
@@ -470,7 +471,29 @@ def _split_why(why):
     return out
 
 
-def ladder(job, bid, k=None):
+def _planned(v):
+    """What a slot shows when no rung ran for it (planned by the script, or a source/stock match): one plain line."""
+    if not v: return ""
+    t = str(v.get("type") or "")
+    if t == "chart":
+        c = v.get("chart") or {}
+        return f"Chart planned by the script ({c.get('kind', 'cards')}: {str(c.get('title') or c.get('caption') or c.get('text') or '')[:60]})"
+    st = str(v.get("stock") or "").replace("\\", "/")
+    if "source_excerpts/" in st: return "Source clip (the video's own footage)"
+    if st: return f"{'Pixabay' if '/pb' in st else 'Pexels' if '/px' in st else 'Stock'} clip {Path(st).stem}"
+    if t == "motion": return "Motion clip"
+    if t == "still": return "AI picture"
+    return t.capitalize() or "Picture"
+
+
+def _vid(b):
+    """The id the job log uses for a long-video slot: the plan visual's id (section 0's slots are one on from it: the title
+    card comes first), else the layout id."""
+    v = b.get("visual") or {}
+    return v["id"] if v.get("id") and not str(v["id"]).startswith("_") else b["id"]
+
+
+def ladder(job, bid, k=None, visual=None):
     """What the visual ladder tried for a beat: [{"slot", "used", "failed": [[rung, reason], ...]}] (Shorts: from the fallback
     chains; explainers: from the job log)."""
     job = Path(job); k = k or kind(job)
@@ -498,6 +521,12 @@ def ladder(job, bid, k=None):
         msg = _clean(m.group(2))
         if _FAILWORD.search(msg): sl["failed"].append(["", msg])
         else: sl["used"] = _clean(msg, 90)
+    # owner, 2026-11-19: every picture says where it came from, even when no rung ran for it (a planned chart, a source or
+    # stock match) - "No ladder record" left the viewer guessing whether everything had failed
+    if visual is not None:
+        sl = slots.setdefault(bid, {"slot": bid, "used": None, "failed": []})
+        if visual.get("chart_rejected"): sl["failed"].insert(0, ["chart", str(visual["chart_rejected"])])
+        if not sl["used"]: sl["used"] = _planned(visual) or None
     return list(slots.values())
 
 
@@ -533,7 +562,7 @@ def beats(job, want=None):
             idx = next((ix for sl, ix in _slots(tb) if sl == b["vi"]), []) if tb else []
             return any(_is_own(tb["bgs"][i]) for i in idx)
         out = [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b), source=_vis_source(b.get("visual")),
-                    rungs=_beat_rungs([b.get("visual") or {}]), ladder=ladder(job, b["id"], k)) for b in long_layout(job)]
+                    rungs=_beat_rungs([b.get("visual") or {}]), ladder=ladder(job, _vid(b), k, visual=b.get("visual") or {})) for b in long_layout(job)]
         if tz:   # your inserts (insert.py): shown in the strip, taken out with undo
             out += [{"id": f"{b['id']}_0", "start": b["start"], "dur": b["dur"], "label": "Your insert", "vo": "", "editable": False,
                      "insert": True, "own": True, "source": None, "rungs": []} for b in tz["beats"] if b.get("insert")]

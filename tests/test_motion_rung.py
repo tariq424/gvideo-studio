@@ -10,7 +10,7 @@ from studio import graphics, qc_repair  # noqa: E402
 def test_motion_is_the_last_resort_before_the_card():
     """owner, 2026-11-12: "This should be the last resort before card" - after every picture rung, never ahead of one."""
     order = [r[0] for r in qc_repair.RUNGS]
-    assert order.index("motion") == order.index("card") - 1
+    assert order.index("motion") == order.index("hyperframes") - 1 == order.index("card") - 2   # owner, 2026-11-18: HyperFrames between
     assert all(order.index(r) < order.index("motion") for r in ("stock", "ai_image", "chatgpt_chain", "static_image"))
     import inspect
     from studio import interview
@@ -73,9 +73,9 @@ def test_interviews_get_the_same_picture_rungs_as_every_other_video():
     names = [r[0] for r in qc_repair.RUNGS]
     pictures = ("meta_chain", "ai_image", "chatgpt_chain", "blender", "video", "cloud", "wangp", "static_image")
     assert all(n in names for n in pictures)
-    assert max(names.index(p) for p in pictures) < names.index("physics") < names.index("motion") < names.index("card")
+    assert max(names.index(p) for p in pictures) < names.index("physics") < names.index("motion") < names.index("hyperframes") < names.index("card")
     d = inspect.signature(qc_repair.ladder_clip).parameters["rungs"].default   # the fact / repair ladder: the same set
-    assert all(p in d for p in pictures) and d[-2:] == ("physics", "motion")
+    assert all(p in d for p in pictures) and d[-3:] == ("physics", "motion", "hyperframes")
 
 
 def test_gemini_is_back_in_the_ai_image_rungs():

@@ -438,10 +438,21 @@ def _rung_motion(ctx):
     return g["path"], None, f"motion graphics ({g['how']})"
 
 
+def _rung_hyperframes(ctx):
+    """owner, 2026-11-18: HyperFrames (HTML -> video, rendered locally) - the script model writes a motion graphic for the line
+    (kinetic type, a counter, a chart, a diagram). A drawing: after the motion templates, just before the card; it takes the
+    lines the fixed templates can't draw. Off with hyperframes_on: false."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    if not ctx["cfg"].get("hyperframes_on", True): return None, None, "skipped (hyperframes_on off)"
+    from . import hyperframes
+    clip, why = hyperframes.make(ctx["cfg"], ctx["vo"], ctx["need"] if ctx["need"] > 0 else 6.0, ctx["W"], ctx["H"], ctx["work"], ctx["log"], key=ctx["key"])
+    return _checked(ctx, clip, why) if clip else (None, None, why)
+
+
 RUNGS = [("stock", _rung_stock), ("meta_chain", _rung_metachain), ("ai_image", _rung_aiimage), ("chatgpt_chain", _rung_chatgpt),
          ("blender", _rung_blender), ("video", _rung_video), ("cloud", _rung_cloud), ("marble", _rung_marble),
          ("local_i2v_own_frame", _rung_ownframe), ("wangp", _rung_wangp), ("static_image", _rung_static),
-         ("studio3d", _rung_studio3d), ("physics", _rung_physics), ("motion", _rung_motion), ("card", _rung_card)]   # 3D studio, then drawings (physics, motion), then the card (owner, 2026-11-12/13)
+         ("studio3d", _rung_studio3d), ("physics", _rung_physics), ("motion", _rung_motion), ("hyperframes", _rung_hyperframes), ("card", _rung_card)]   # 3D studio, then drawings (physics, motion, HyperFrames), then the card (owner, 2026-11-12/13/18)
 
 
 # ------------------------------------------------------------------ splice
@@ -563,7 +574,7 @@ def repair(mp4, cfg, job_dir, log=print, stop=lambda: False, vert=False, narrati
 
 def ladder_clip(cfg, text, visual, secs, kind, work, job_dir, src=None, log=print,
                 rungs=("stock", "meta_chain", "ai_image", "chatgpt_chain", "blender", "video", "cloud", "marble", "local_i2v_own_frame",
-                       "wangp", "static_image", "studio3d", "physics", "motion")):
+                       "wangp", "static_image", "studio3d", "physics", "motion", "hyperframes")):
     """The repair ladder for a picture that isn't replacing a fault (owner, 2026-10-27: an interview fact's outside media goes
     through the rungs as a QC proof of concept). -> (clip, rung) or (None, ""). Each rung once; every candidate frame-checked;
     attempts logged to <work>/ladder.json. The card rung is left out: the interview has its own fallback under a fact."""

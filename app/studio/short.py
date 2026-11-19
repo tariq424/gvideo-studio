@@ -99,7 +99,7 @@ COVERAGE: if the notes run out of substantive points before {words} words, stop 
 beats padding); otherwise write the full length and set "covered": false.
 Also give "title" (max 60 chars, YouTube title), "tag" (max 28 chars, small label shown at the top, e.g. "MOONSHOTS #293 · CONDENSED"),
 "description" (2-3 sentences for YouTube that credit {channel} and the original), and "source_spoken": how a narrator would
-name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a NotebookLM briefing on battery recycling".
+name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a briefing on battery recycling". Never name a tool that made the source (NotebookLM, an AI voice): it is the owner's own work.
 
 Reply with ONLY JSON:
 {{"title":"...","tag":"...","description":"...","source_spoken":"...","covered":false,"beats":[{{"vo":"...","take":"optional: our opinion, copied from vo","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
@@ -331,6 +331,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             if plan.get("editorial_warnings"):
                 jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
         punch_up(cfg, plan, log, force=smoke, budget=None if smoke else int(total * 1.05))   # smoke: every beat gets its joke here; otherwise only beats still without one; extra asides only while the budget allows
+        if not smoke:
+            from .writer import fresh_hook
+            plan = fresh_hook(llm, plan, log)   # owner, 2026-11-19: the opening line must not repeat a later one
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0

@@ -251,7 +251,7 @@ def test_when_every_picture_fails_the_line_gets_a_card_never_her_face(tmp_path):
     lad._rungs = lambda text, visual, d, out, rungs: tried.append(rungs) or ((out, "rung card", "") if rungs == ("card",) else None)
     lad.sketch = lambda *a, **k: None   # (no live image service in a test)
     assert lad.media("Merrimack River", "Merrimack, New Hampshire.", 5, tmp_path / "c.mp4")[1] == "rung card"
-    assert tried == [("ai_image",), ("studio3d",), ("physics",), ("motion",), ("card",)]   # owner, 2026-11-12/13: 3D studio, then drawings, last before the card
+    assert tried == [("ai_image",), ("studio3d",), ("physics",), ("motion",), ("hyperframes",), ("card",)]   # owner, 2026-11-12/13/18: 3D studio, then drawings (+ HyperFrames), last before the card
 
 
 def test_no_ai_image_cap_by_default():

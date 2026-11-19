@@ -46,3 +46,6 @@ app/ovmodels/
 
 # server logs
 app/server_*.log
+
+# scratch: files set aside for deletion
+_to_delete/

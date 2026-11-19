@@ -239,3 +239,20 @@ def apply(out, root, roots=None, log=print):
         log(f"Reframe: {moved} clip(s) aimed at their subject, {framed} shown whole, {seqs} two-subject clip(s) shown whole then "
             f"each subject in turn, {dropped} empty speaker inset(s) dropped")
     return out
+
+
+# owner, 2026-11-19 ("example of a bad zoom again", "I would rather see her face, than body"): a source excerpt cut while the
+# event camera was mid-move showed hands with black between them, or a body with the face cut off at the top. Before an
+# excerpt is used its frames are checked: the share of frames with a whole, readable face in them.
+FRAMED_OK = 0.75      # this share of frames with a whole face: well framed
+FRAMED_MIN = 0.5      # below this (when nearby footage does show faces) the excerpt is not used
+
+
+def framing(path, k=8):
+    """-> share (0-1) of k frames across the clip showing at least one whole face (not touching the top edge, readable size)."""
+    fr = _frames(path, k=k)
+    if not fr: return 0.0
+    good = 0
+    for im in fr:
+        if any(y0 > 0.015 and (y1 - y0) >= 0.07 for x0, y0, x1, y1 in faces(im)): good += 1
+    return good / len(fr)

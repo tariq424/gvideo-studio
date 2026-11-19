@@ -176,7 +176,7 @@ def build(job, plan, cfg, log, stop=lambda: False):
         ins += ["-i", str(vo)]
         fl.append(f"[{i}:a]aresample=48000,adelay={int(LEAD * 1000)}:all=1,apad,atrim=duration={D:.3f}[a{i}]")
     fl.append("".join(f"[a{i}]" for i in range(len(audio_parts))) + f"concat=n={len(audio_parts)}:v=0:a=1,apad,atrim=duration={total:.3f},"
-              "equalizer=f=120:t=q:w=1:g=2,loudnorm=I=-16:TP=-1.5:LRA=11[out]")
+              + media.VOICE_FX + "[out]")
     media.ff(*ins, "-filter_complex", ";".join(fl), "-map", "[out]", "-ar", 48000, pub / "voice.wav")
     data = {"audio": "voice.wav", "total": round(total, 3), "tag": "", "beats": beats, "w": W, "h": H, "progress": False}
     from .render_media import sanitize_timeline

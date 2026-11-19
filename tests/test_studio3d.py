@@ -11,9 +11,9 @@ from studio import qc_repair, studio3d  # noqa: E402
 
 def test_studio3d_sits_after_the_pictures_and_ahead_of_the_drawings():
     order = [r[0] for r in qc_repair.RUNGS]
-    assert order.index("static_image") < order.index("studio3d") < order.index("physics") < order.index("motion") < order.index("card")
+    assert order.index("static_image") < order.index("studio3d") < order.index("physics") < order.index("motion") < order.index("hyperframes") < order.index("card")
     d = inspect.signature(qc_repair.ladder_clip).parameters["rungs"].default
-    assert d[-3:] == ("studio3d", "physics", "motion")
+    assert d[-4:] == ("studio3d", "physics", "motion", "hyperframes")
 
 
 def test_every_ladder_tries_studio3d_before_drawing():

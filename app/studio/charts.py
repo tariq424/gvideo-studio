@@ -90,3 +90,28 @@ def render(spec, out):
         f.savefig(out, dpi=100, facecolor=BG)
     finally:
         plt.close(f)
+
+
+# owner, 2026-11-19: a chart of four boxes all saying "Racing to build a general-purpose quantum computer" told the viewer
+# nothing; neither does a curve marked "illustrative" (made-up numbers). Such a chart is not drawn: the slot becomes a
+# picture and goes down the picture ladder (source footage, a screenshot of the subject, stock, recreation, parallax,
+# Blender, HyperFrames...).
+def weak(spec):
+    """-> why this chart carries no information ("" when it is fine)."""
+    if not isinstance(spec, dict): return "no chart spec"
+    k = spec.get("kind", "cards")
+    note = " ".join(str(spec.get(x) or "") for x in ("note", "subtitle")).lower()
+    if k in ("bar", "line") and any(w in note for w in ("illustrative", "hypothetical", "approximate shape", "not to scale")):
+        return "its numbers are made up (marked illustrative)"
+    if k == "cards":
+        bodies = [" ".join(str((i or {}).get("body") or "").lower().split()) for i in spec.get("items") or []]
+        bodies = [b for b in bodies if b]
+        if len(bodies) >= 2 and len(set(bodies)) <= len(bodies) // 2: return "its boxes repeat the same text"
+        if not bodies and not spec.get("lines"): return "its boxes are empty"
+    if k in ("bar", "line"):
+        vals = spec.get("values") if k == "bar" else spec.get("y")
+        if not vals or len(set(map(str, vals))) < 2: return "it has no data to compare"
+    if k == "compare":
+        l, r = (spec.get("left") or {}), (spec.get("right") or {})
+        if " ".join(str(l.get("body", "")).lower().split()) == " ".join(str(r.get("body", "")).lower().split()): return "both sides say the same"
+    return ""

@@ -87,7 +87,11 @@ def load(src, upload, title, credit, log):
     text = re.sub(r"[ \t]+", " ", text).strip()
     if len(text.split()) < 150: raise RuntimeError(f"The {kind} has only {len(text.split())} words; need at least 150 to make a video.")
     name = upload.stem.replace("_", " ") if upload else "Pasted notes"
-    meta = {"title": title or name, "channel": credit or ("NotebookLM" if "notebooklm" in (name + (credit or "")).lower() else ""),
+    # owner, 2026-11-19: an audio made with NotebookLM is the owner's own work; naming the tool makes viewers think it is AI
+    # slop, so the tool's name is never the credit and is taken out of a title made from the file name
+    name = re.sub(r"\s{2,}", " ", re.sub(r"(?i)\b(google\s+)?notebook\s?lm\b[\s:_-]*", "", name)).strip(" -_:") or "Notes"
+    if credit and re.search(r"(?i)notebook\s?lm", credit): credit = ""
+    meta = {"title": title or name, "channel": credit or "",
             "uploader": credit or "", "webpage_url": "", "description": "", "source_kind": kind}
     if own: meta.update(own_footage=True, channel=credit or "Your footage")
     (src / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")

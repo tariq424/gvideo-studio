@@ -202,11 +202,11 @@ def process(cfg, job_dir, log=None):
             short_d = _draft(cfg, job, "short", channel, title, media.dur(vids["short"]), job_dir, published)
             if "long" in mine:   # the video is up, its Short is not: the Short alone, linked to it
                 short_d.update(link_target=mine["long"]["video_id"], long_url=mine["long"]["url"])
-                ids = {"short_task": _http(cfg, "/publish", data=short_d)["task_id"]}
+                ids = {"short_task": _publish(cfg, short_d)}
             else:
                 ids = _http(cfg, "/publish/pair", data={"long": long_d, "short": short_d})
         else:
-            ids = {"long_task": _http(cfg, "/publish", data=long_d)["task_id"]}
+            ids = {"long_task": _publish(cfg, long_d)}
     except Exception as e:
         msg = str(e)[:200]
         busy = "in progress" in msg or "shared Chrome profile" in msg
@@ -237,6 +237,16 @@ def process(cfg, job_dir, log=None):
     except (OSError, ValueError): pass
     # a Short whose Related video couldn't be set yet counts as not done: the retry sets only the link (_link_only)
     return all(v["status"] == "complete" for v in rows.values()) and not any(v.get("link_error") for v in rows.values())
+
+
+def _publish(cfg, body):
+    """/publish -> task id. An earlier try that stopped part-way left its upload as a Studio draft: the publisher then refuses
+    a new upload ("Previous upload state exists"), so that draft is finished instead (mode resume: no second upload).
+    owner, 2026-11-19: drafts sat on the main channel because every retry asked for a new upload and was refused."""
+    try: return _http(cfg, "/publish", data=body)["task_id"]
+    except RuntimeError as e:
+        if "Previous upload state exists" not in str(e): raise
+        return _http(cfg, "/publish", data=dict(body, mode="resume"))["task_id"]
 
 
 def _link_only(cfg, mine, say):

@@ -1602,7 +1602,7 @@ Reply with JSON only: {{"bad": [second numbers], "why": "a few words"}}"""
         # owner, 2026-11-12: a drawn animation (map, route, chart, stick figures...) is the LAST resort, after every picture
         # rung failed, just before the card (qc_repair._rung_motion; look: motion_look = paper | whiteboard)
         # owner, 2026-11-13: a real 3D model in the studio (like the Volvo) comes ahead of the simple drawings
-        for r in (("studio3d",) if self.cfg.get("studio3d_on", True) else ()) + (("physics", "motion") if self.cfg.get("motion_rung", True) else ()):
+        for r in (("studio3d",) if self.cfg.get("studio3d_on", True) else ()) + (("physics", "motion") if self.cfg.get("motion_rung", True) else ()) + (("hyperframes",) if self.cfg.get("hyperframes_on", True) else ()):
             got = self._rungs(text, visual, d, out, (r,))
             if got and self.fits(got[0], visual, text): return got
         return self._rungs(text, visual, d, out, ("card",)) if self.cfg.get("interview_card_fallback", True) else None

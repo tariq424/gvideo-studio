@@ -1,0 +1,6 @@
+{
+ "name": "vs-hyperframes",
+ "private": true,
+ "description": "HyperFrames (HTML to video) for the ladder rung - local renders only, telemetry off (studio/hyperframes.py)",
+ "dependencies": {"gsap": "3.13.0", "hyperframes": "0.9.17"}
+}

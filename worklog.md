@@ -1,4 +1,44 @@
 <!-- PICKUP (read first) -->
+## PICKUP — 2026-11-19 3:30 PM (status before the owner's reboot)
+
+**Running state**
+- Video Studio (42020, `F:\code\video-studio-test\app`) is idle. Job **20261119_061158** (Brett Adcock robotics, auto length,
+  48 sections, 68.5 min) was hard-stopped during the final Remotion render at the owner's request so the PC can reboot.
+  Every stage before the render is saved (`state.json` stage = assemble). **Resume** in the UI redoes only assemble + render.
+- YouTube Publisher (42030, `F:\youtube-publisher`) restarted today with the fixes below.
+- After the reboot, start Video Studio fresh. It picks up all of today's code (nothing below was loaded by the old process).
+
+**Fixed today (2026-11-19)**
+- Drafts on the main channel: Publisher only accepted "Upload complete"; Shorts/long often show only "Checks complete",
+  so finished uploads timed out and stayed Drafts. Now either text counts (`studio_automation.py`). `youtube_main._publish`
+  retries a refused "Previous upload state exists" as `mode=resume`; `republish` raises Blocked instead of re-uploading
+  when the new upload is a stalled draft (stops duplicate copies).
+- Publisher delete: false "deleted" on a blank/loading page fixed (only VISIBLE gone/unavailable text counts; Options
+  button = still there; otherwise error, nothing deleted). Checkbox fallback clicks; draft button "Delete draft video".
+- 5 duplicate Kaku uploads deleted (verified in Studio). Kept: long `Ch2jvFkJupA`, Short `nneKQS6lGh8` (link the Short's
+  Related video by hand: https://studio.youtube.com/video/nneKQS6lGh8/edit).
+- "Don't Write Prompts" saved Private with thumbnail: https://www.youtube.com/watch?v=hRPyhsydNHY
+- NotebookLM is never named: not the credit, stripped from file-name titles, the Short writer is told not to name the tool.
+- `editor_session._write`: unique temp file per writer + retried replace (the WinError 32/2 race that crashed a job).
+- Models are released at the end of every job: captions Whisper, depth (Depth Anything), background removal (u2net) +
+  `gc.collect()` (`pipeline._worker` finally). Ollama models already unload with `keep_alive: 0`; Kokoro runs in its own
+  process; WanGP is released at job end.
+- `writer.fresh_hook`: a reply without "hook" keeps the old hook instead of crashing.
+
+**Why the robotics job was slow (not stuck)**
+- 68.5-min video (3-14x the usual 5-25 min). Render ran at ~320 frames/min with only **2 Remotion workers**:
+  `short.render_concurrency` picks 2 when free RAM < 5 GB, and desktop apps left 3.9 GB free; CPU sat at 12%.
+- Pictures: broll 2 h, stills 2 h (Cloudflare + Hugging Face free quotas exhausted, so ChatGPT made every still, ~60 s each).
+
+**Next (owner-approved order)**
+1. Render workers: size them by what the render needs, not by free RAM with desktop apps open; log + warn the owner
+   when resources are low.
+2. Length: "Auto" = 15 min suggested; the slider gets the same checkbox; the video at least fills the chosen length, no cap.
+3. Beat editor window (from the ladder panel's per-beat row): scrubber, the beat's STT text and prompts, rung dropdown,
+   render that rung or drop/link own video or still (stills get camera moves: overhead, dolly, pan, zoom), Discard or
+   Splice only that beat. A "please wait" modal with OK when the pipeline is busy.
+
+<!-- previous pickup -->
 ## PICKUP — 2026-10-26 8:10 PM EDT (QC repair-by-ladder go-live, exchange doc MSG 009)
 
 - **Live settings (PC F:\code\video-studio-test\settings.json):**

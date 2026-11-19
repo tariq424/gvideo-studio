@@ -28,6 +28,7 @@ def folder(cfg):
 MOODS = {   # mood -> how we describe a new track of that mood to Gemini (kind: hook = 15-20 s cue, bed = loopable background)
     "tense":       ("hook", "a tense cinematic build-up, low pulsing strings and a ticking pulse, 15-20 seconds, ending on a hit"),
     "dramatic":    ("hook", "a dramatic orchestral opener, big drums and brass swell, 15-20 seconds"),
+    "epic":        ("hook", "a huge orchestral swell: a low sustained note rising into a brass fanfare, pounding timpani and a full-orchestra climax, 15-20 seconds"),
     "playful":     ("hook", "a playful, cheeky pizzicato and woodblock sting, bright and quick, 15-20 seconds"),
     "classical":   ("bed", "light classical chamber music, string quartet and piano, gentle and elegant, steady tempo, loopable"),
     "light-dance": ("bed", "light, bouncy dance groove, soft four-on-the-floor beat, warm synths, unobtrusive, loopable"),
@@ -154,6 +155,7 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text="", timeline=None):
         hook, bed = choose(cfg, "hook", hm, rng, log), choose(cfg, "bed", bm, rng, log)
     if not hook and not bed:
         log(f"  music: no tracks in the library ({folder(cfg)}); no music added"); return False
+    swells_used = ([], None)
     try:
         total = media.dur(mp4); h = max(0.0, min(float(hook_secs), total)) if hook else 0.0
         hdb, bdb = float(cfg.get("music_hook_db", -4)), float(cfg.get("music_bed_db", -6))
@@ -174,7 +176,16 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text="", timeline=None):
             # the music follows the narration's own word timings: low under speech, smooth fades up into each pause and
             # back down before the next word (no compressor guessing, so no sudden jumps)
             expr, pauses = fade_curve(spans, total, cfg)
-            flt = ";".join(parts) + ";" + music.replace("[m];", f",volume='{expr}':eval=frame[md];") + "[0:a][md]amix=inputs=2:normalize=0:duration=first[a]"
+            sw = [tuple(x) for x in was["swells"]] if was and "swells" in was else pick_swells(cfg, timeline, total, log)
+            swt = Path(was["swell_track"]) if was and was.get("swell_track") and Path(was["swell_track"]).exists() else None
+            if sw and not swt:   # an epic cue from the library, else a dramatic one, else a new epic one, else the hook's
+                have = {x["mood"] for x in library(cfg) if x["kind"] == "hook"}
+                swt = choose(cfg, "hook", "epic" if "epic" in have or "dramatic" not in have else "dramatic", rng, log) or hook
+            sins, sparts, slabels = swell_filters(sw, swt, len([x for x in ins if x == "-i"]), cfg) if sw and swt else ([], [], [])
+            ins += sins; parts += sparts
+            flt = ";".join(parts) + ";" + music.replace("[m];", f",volume='{expr}':eval=frame[md];") + \
+                  f"[0:a][md]{''.join(slabels)}amix=inputs={2 + len(slabels)}:normalize=0:duration=first[a]"
+            if slabels: swells_used = (sw, swt)
             log(f"  music: fades with the narration ({len(pauses)} pause(s) where it comes up)")
         else:
             # no word timings: duck the music under the voice (sidechain); the voice level is untouched
@@ -187,7 +198,8 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text="", timeline=None):
         if media.dur(tmp) < total - 0.5: raise RuntimeError("the result came out shorter")
         tmp.replace(mp4)
         (mp4.parent / (mp4.stem + "_music.json")).write_text(json.dumps({"hook": str(hook or ""), "bed": str(bed or ""), "hook_secs": h,
-                                                                         "moods": [hm, bm]}, indent=1), encoding="utf-8")
+                                                                         "moods": [hm, bm], "swells": [list(x) for x in swells_used[0]],
+                                                                         "swell_track": str(swells_used[1] or "")}, indent=1), encoding="utf-8")
         log(f"Music added: {'hook ' + hook.name + f' ({h:.1f}s)' if hook else ''}{' + ' if hook and bed else ''}{'bed ' + bed.name if bed else ''}")
         return True
     except Exception as e:
@@ -202,3 +214,86 @@ def hook_secs_short(job):
         return float(b0["start"]) + float(b0["dur"])
     except Exception:
         return 6.0
+
+
+# ---------------------------------------------------------------- swells at the dramatic moments (owner, 2026-11-19)
+# "At dramatic events we want some loud music as in space odyssey 2001." The script AI picks the few most dramatic lines
+# (a reveal, the stakes, a turning point); at each, an epic cue's climax rises under the last words, plays at full level in
+# the pause after the line and sinks back under the next words. Our own library tracks only (the "epic" mood, else
+# "dramatic"); the famous recording itself is not used. Settings: music_swells (true), music_swell_db (0: as loud as the
+# voice), music_swell_every (one per this many seconds, at most music_swell_max).
+SWELL_PICK = """These are lines of a video's narration with the second each one ends. Pick the {n} most DRAMATIC moments:
+a big reveal, the stakes made plain, a turning point, a shocking number - the lines after which a film would hit a loud
+orchestral swell. Never a joke, a question to the viewer or the sign-off. Lines:
+{lines}
+Reply with JSON only: {{"picks": [line numbers]}}"""
+SWELL_PRE, SWELL_POST = 2.0, 2.5
+
+
+def swell_candidates(timeline, min_pause=0.6):
+    """[(end_second, next_word_second, sentence)] of the narration's sentences followed by a pause of at least min_pause."""
+    try: tj = json.loads(Path(timeline).read_text(encoding="utf-8"))
+    except Exception: return []
+    words = sorted((float(b["start"]) + float(st), float(b["start"]) + float(en), str(w)) for b in tj["beats"] for w, st, en in b.get("words") or [])
+    out, cur = [], []
+    for i, (st, en, w) in enumerate(words):
+        cur.append(w)
+        if not w.rstrip("\"'").endswith((".", "!", "?")): continue
+        nxt = words[i + 1][0] if i + 1 < len(words) else en + 5
+        if nxt - en >= min_pause: out.append((round(en, 2), round(nxt, 2), " ".join(cur)))
+        cur = []
+    return out
+
+
+def pick_swells(cfg, timeline, total, log):
+    """-> [(end_second, next_word_second)] of the dramatic moments (none when off or nothing fits)."""
+    if not cfg.get("music_swells", True) or not timeline: return []
+    cands = [c for c in swell_candidates(timeline) if 20 < c[0] < total - 20]
+    if not cands: return []
+    n = max(1, min(int(cfg.get("music_swell_max", 4)), int(total // float(cfg.get("music_swell_every", 300)))))
+    lines = "\n".join(f"[{i}] ({c[0]:.0f}s) {c[2][:220]}" for i, c in enumerate(cands))
+    try:
+        from .llm import LLM
+        def ok(j):
+            if not isinstance(j.get("picks"), list) or not j["picks"]: raise ValueError("picks: a list of line numbers")
+            if any(not isinstance(x, int) or not 0 <= x < len(cands) for x in j["picks"]): raise ValueError("line numbers out of range")
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            j = llm.chat_json("You are a film music editor. Reply with JSON only.", SWELL_PICK.format(n=n, lines=lines[:30000]), max_tokens=120, check=ok)
+    except Exception as e:
+        log(f"  music: no dramatic swells ({str(e)[:100]})"); return []
+    out = []
+    for i in sorted({int(x) for x in j["picks"]})[:n]:   # never two swells within a minute of each other
+        if not out or cands[i][0] - out[-1][0] > 60: out.append((cands[i][0], cands[i][1]))
+    for t, _ in out: log(f"  music: dramatic swell at {t:.0f}s")
+    return out
+
+
+def climax(track, secs):
+    """-> the offset (s) in track where its loudest `secs`-long stretch begins, less the rise (the cue's climax)."""
+    import re, subprocess
+    try:
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(track), "-af", "asetnsamples=n=44100,astats=metadata=1:reset=1,"
+                            "ametadata=print:key=lavfi.astats.Overall.RMS_level", "-f", "null", "-"], capture_output=True, text=True, timeout=120)
+        lv = [-120.0 if "inf" in x else float(x) for x in re.findall(r"RMS_level=(-?inf|-?[\d.]+)", r.stderr)]
+    except Exception: return 0.0
+    w = max(1, int(round(secs)))
+    if len(lv) <= w: return 0.0
+    best = max(range(len(lv) - w), key=lambda i: sum(lv[i:i + w]))
+    return max(0.0, best - SWELL_PRE)
+
+
+def swell_filters(swells, track, first_input, cfg):
+    """-> (extra ffmpeg inputs, filter parts, labels) laying the cue's climax over each swell."""
+    db = float(cfg.get("music_swell_db", 0))
+    ins, parts, labels = [], [], []
+    for i, (t, nxt) in enumerate(swells):
+        hold = max(0.5, nxt - t)
+        d = SWELL_PRE + hold + SWELL_POST
+        off = climax(track, d)
+        st = max(0.0, t - SWELL_PRE)
+        ins += ["-i", str(track)]; k = first_input + i
+        parts.append(f"[{k}:a]atrim={off:.2f}:{off + d:.2f},asetpts=PTS-STARTPTS,{NORM},volume={db}dB,"
+                     f"afade=t=in:st=0:d={SWELL_PRE},afade=t=out:st={SWELL_PRE + hold:.2f}:d={SWELL_POST},"
+                     f"aformat=channel_layouts=stereo,adelay={int(st * 1000)}|{int(st * 1000)}[sw{i}]")
+        labels.append(f"[sw{i}]")
+    return ins, parts, labels

@@ -21,9 +21,19 @@ def do_charts(job, plan, cfg, log):
     charts.render({"kind": "title", "title": plan["title"], "subtitle": plan.get("subtitle", ""), "credit": credit}, d / "_title.png")
     # owner, 2026-11-18: the end card never says where the video came from (the description credits the source)
     charts.render({"kind": "end", "text": plan.get("end_text") or "Thanks for watching", "credit": ""}, d / "_end.png")
-    n = 0
+    n = 0; moved = 0
     for s in plan["sections"]:
         for v in s["visuals"]:
+            why = charts.weak(v.get("chart")) if v["type"] == "chart" and not v.get("keep_chart") else ""
+            if why:   # owner, 2026-11-19: an empty chart becomes a picture slot (the picture ladder takes it)
+                c = v.get("chart") or {}
+                subj = c.get("title") or c.get("caption") or s.get("title") or ""
+                heads = [str((i or {}).get("head") or "") for i in c.get("items") or []]
+                if any(heads): subj += " (" + ", ".join(h for h in heads if h) + ")"
+                v.update(type="still", chart_rejected=why,
+                         prompt=v.get("prompt") or f"{subj}: a real, specific scene that shows it - {s.get('title', '')}. Cinematic photograph, 16:9.")
+                log(f"  {v['id']}: chart dropped ({why}); the picture ladder takes this slot")
+                moved += 1; continue
             if v["type"] == "chart":
                 p = d / f"{v['id']}.png"
                 if not p.exists():
@@ -31,7 +41,10 @@ def do_charts(job, plan, cfg, log):
                     except Exception as e:
                         log(f"  chart {v['id']} failed ({e}); using a text card"); charts.render({"kind": "cards", "title": s["title"], "items": []}, p)
                 n += 1
-    log(f"Charts: {n} rendered")
+    if moved:
+        from .pipeline import Job
+        Job(job).save_plan(plan)
+    log(f"Charts: {n} rendered" + (f", {moved} empty one(s) turned into pictures" if moved else ""))
 
 def do_voice(job, plan, cfg, wg, log, stop):
     """WanGP (when needed at all) is started on demand and stopped as soon as this batch is done (wangp.py)."""

@@ -61,14 +61,15 @@ class LLM:
     def name(self):
         return {"claude": self.cfg["script_model"], "zai": self.cfg["zai_model"], "deepseek": self.cfg["deepseek_model"], "local": self.cfg.get("ollama_model", "qwen3:14b") + " (local)"}[self.provider]
 
-    def chat(self, system, user, max_tokens=4000):
+    def chat(self, system, user, max_tokens=4000, web=False):
         for attempt in range(4):
-            try: return self._chat(system, user, max_tokens)
+            try: return self._chat(system, user, max_tokens, web)
             except Exception as e:
                 if attempt == 3: raise
                 self.log(f"  model call failed ({str(e)[:120]}), retrying"); time.sleep(10 * (attempt + 1))
 
-    def _chat(self, system, user, max_tokens):
+    def _chat(self, system, user, max_tokens, web=False):
+        if web and self.provider == "deepseek": return self._chat_web(system, user, max_tokens)
         if self.provider == "local":
             return self.local.chat(system, user, max_tokens)
         import anthropic
@@ -92,12 +93,35 @@ class LLM:
             raise RuntimeError(f"empty answer from {model} (blocks: {kinds or 'none'}, stop: {getattr(m, 'stop_reason', '?')})")
         return text
 
-    def chat_json(self, system, user, max_tokens=4000, check=None):
+    def _chat_web(self, system, user, max_tokens):
+        """owner, 2026-11-18: DeepSeek's own server-side web search - declared as a tool on the same API call (the same key
+        as the narration and jokes); the model decides whether to search and answers from what it found. No tool_choice
+        (DeepSeek refuses it for its search tools), thinking off. Today's date goes in the system prompt, or it searches for
+        the year it was trained in. Sources found go to self.last_sources."""
+        import anthropic, datetime
+        c = anthropic.Anthropic(api_key=self.cfg["deepseek_api_key"], base_url=self.cfg["deepseek_base_url"])
+        sysp = f"Today is {datetime.date.today().isoformat()}. Search the web before answering. " + (system or "")
+        m = c.messages.create(model=self.cfg["deepseek_model"], max_tokens=max(max_tokens, 1500), system=sysp,
+                              messages=[{"role": "user", "content": user}], thinking={"type": "disabled"},
+                              tools=[{"type": "deepseek_web_search", "name": "deepseek_web_search"}])
+        try: self.tokens_in += m.usage.input_tokens; self.tokens_out += m.usage.output_tokens
+        except Exception: pass
+        self.last_sources = []
+        for b in m.content:
+            if getattr(b, "type", "") == "web_search_tool_result":
+                for r in (getattr(b, "content", None) or []):
+                    u = getattr(r, "url", None) if not isinstance(r, dict) else r.get("url")
+                    if u and u not in self.last_sources: self.last_sources.append(u)
+        text = "".join(b.text for b in m.content if getattr(b, "type", "") == "text").strip()
+        if not text: raise RuntimeError(f"empty answer after web search (stop: {getattr(m, 'stop_reason', '?')})")
+        return text
+
+    def chat_json(self, system, user, max_tokens=4000, check=None, web=False):
         """Ask for JSON, parse leniently, re-ask with the error if it doesn't parse or fails check()."""
         msg = user
         self._save_prompt(system, user)
         for attempt in range(3):
-            t = self.chat(system, msg, max_tokens)
+            t = self.chat(system, msg, max_tokens, web=web) if web else self.chat(system, msg, max_tokens)
             try:
                 j = parse_json(t)
                 if check: check(j)

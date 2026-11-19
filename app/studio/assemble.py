@@ -102,7 +102,7 @@ def finalize(job, plan, parts, meta, log):
     b = job / "build"; o = job / "output"; o.mkdir(exist_ok=True)
     slug = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"])[:60].strip("_") or "explainer"
     lst = b / "final.txt"; lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
-    media.ff("-f", "concat", "-safe", 0, "-i", lst, "-vn", "-af", "equalizer=f=120:t=q:w=1:g=2,loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", 48000, b / "final_audio.wav")
+    media.ff("-f", "concat", "-safe", 0, "-i", lst, "-vn", "-af", media.VOICE_FX, "-ar", 48000, b / "final_audio.wav")
     media.ff("-f", "concat", "-safe", 0, "-i", lst, "-an", "-c:v", "copy", b / "final_video.mp4")
     final = o / f"{slug}_explainer_1080p.mp4"
     media.ff("-i", b / "final_video.mp4", "-i", b / "final_audio.wav", "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", final)

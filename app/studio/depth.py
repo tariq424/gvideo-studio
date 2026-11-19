@@ -117,6 +117,12 @@ def layers(still, out_prefix, log, size=(1080, 1920)):
 _rembg = {"session": None}
 
 
+def release():
+    """Drop the cached depth and background-removal models (owner, 2026-11-19: no model stays loaded after use)."""
+    global _sess
+    _sess = None; _rembg["session"] = None
+
+
 def cutout_layers(still, out_prefix, log, size=(1080, 1920)):
     """Source Parallax (rung 4): the generated image cut with rembg into a background (subject painted out) and the
     subject as one rigid RGBA layer, for Remotion's 2.5D parallax. Falls back to depth layers when rembg is missing.

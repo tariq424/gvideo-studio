@@ -697,4 +697,10 @@ if __name__ == "__main__":
             if n: print(f"Replace published: {n} edited job(s) queued", flush=True)
         except Exception as e:
             print(f"Replace published sweep skipped: {e}", flush=True)
+        try:   # owner, 2026-11-19: a finished video changed any way (not only the editor's Save) replaces its published copies
+            from studio import republish, editor_session
+            republish.watch(lambda: config.load()["jobs_dir"],
+                            editing=lambda: (editor_session.state(namespace=_editor_ns()) or {}).get("jid"))
+        except Exception as e:
+            print(f"Replace published watcher not started: {e}", flush=True)
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True, use_reloader=reload)

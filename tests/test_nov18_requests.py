@@ -38,7 +38,7 @@ def test_auto_length_follows_the_source_not_a_slot():
 
 
 def test_commentary_uses_only_facts_from_the_research(monkeypatch):
-    monkeypatch.setattr(websearch, "light", lambda cfg, q, log=None: (["Haber-Bosch: the process uses about 1 percent of world energy."], "wikipedia"))
+    monkeypatch.setattr(websearch, "light", lambda cfg, q, log=None, llm=None: (["Haber-Bosch: the process uses about 1 percent of world energy."], "wikipedia"))
     llm = FakeLLM([{"query": "Haber-Bosch process"},
                    {"commentary": "The fertilizer process eats 7 percent of the world's energy. Honestly, that is the real prize."},   # 7 is invented
                    {"commentary": "Making fertilizer already uses about 1 percent of the world's energy. Honestly, that is the real prize here."}])
@@ -47,7 +47,7 @@ def test_commentary_uses_only_facts_from_the_research(monkeypatch):
 
 
 def test_no_research_means_no_commentary(monkeypatch):
-    monkeypatch.setattr(websearch, "light", lambda cfg, q, log=None: ([], ""))
+    monkeypatch.setattr(websearch, "light", lambda cfg, q, log=None, llm=None: ([], ""))
     llm = FakeLLM([{"query": "x y z"}])
     assert writer.research_commentary(llm, {}, "T", "Some beat.", lambda *_: None, "short", "b1") == ""
 
@@ -110,3 +110,40 @@ def test_no_video_ends_by_saying_where_it_came_from():
     assert '"credit": ""' in inspect.getsource(render.do_charts)
     tsx = (Path(__file__).resolve().parents[1] / "remotion" / "src" / "Graphics.tsx").read_text(encoding="utf-8")
     assert "{title || thumb || play ? <div" in tsx                   # no empty box on the end card
+
+
+def test_research_waits_and_retries_when_rate_limited(monkeypatch):
+    """Wikipedia 429 / DuckDuckGo 202 after a burst: wait and try again instead of giving up on the rest of the sections."""
+    import requests
+    from studio import websearch
+    calls, waits = [], []
+    class R:
+        def __init__(self, code, text=""): self.status_code, self.text, self.headers = code, text, {}
+    seq = [R(429), R(429), R(200, "ok")]
+    monkeypatch.setattr(requests, "get", lambda *a, **k: calls.append(1) or seq[len(calls) - 1])
+    r = websearch._polite_get("https://en.wikipedia.org/w/api.php", {}, {}, sleep=waits.append)
+    assert r.status_code == 200 and len(calls) == 3 and any(w >= 4 for w in waits)
+    calls.clear(); seq[:] = [R(202), R(200, "no results here"), R(200, "<a class=\"result__snippet\">x</a>")]
+    r = websearch._polite_get("https://html.duckduckgo.com/html/", {}, {}, ok=lambda r: "result__snippet" in r.text, sleep=waits.append)
+    assert "result__snippet" in r.text and len(calls) == 3
+    calls.clear(); seq[:] = [R(404)]
+    try: websearch._polite_get("https://x.org", {}, {}, sleep=waits.append); assert False
+    except RuntimeError as e: assert "404" in str(e) and len(calls) == 1
+
+
+def test_every_search_is_deepseek_only(monkeypatch):
+    """owner, 2026-11-18: "for searches, we don't use duck duck... at all. we use deepseek with API key"."""
+    from studio import websearch
+    for name in ("_wikipedia", "_ddg", "_bing", "_copilot", "_google"):
+        monkeypatch.setattr(websearch, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("no web route may be asked")))
+    monkeypatch.setattr(websearch, "ROUTES", {k: getattr(websearch, "_" + k if k != "duckduckgo" else "_ddg") for k in websearch.ROUTES})
+    class L:
+        def trace(self, n): return self
+        def chat_json(self, sys_, prompt, max_tokens=0, check=None, web=False): return {"facts": [{"fact": "Gott and Li published the idea in 1998.", "url": "https://journals.aps.org/x"}, "short"]} if web else {}
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    got, route = websearch.light({}, "Gott Li universe", llm=L())
+    assert route == "deepseek" and got == ["Gott and Li published the idea in 1998."]
+    import studio.llm as llm_mod
+    monkeypatch.setattr(llm_mod, "LLM", lambda cfg, log, stop=None: L())
+    assert websearch.search({}, "Gott Li universe") == (["Gott and Li published the idea in 1998."], "deepseek")   # QC repair / interview path

@@ -15,6 +15,30 @@ REST = {"wikipedia": 600, "duckduckgo": 1800, "bing": 1800, "copilot": 3600, "go
 GOOGLE_MIN_GAP = 3600
 
 
+# owner, 2026-11-18: a whole explainer researches 18+ sections in a row; Wikipedia answered 429 and DuckDuckGo 202 (its
+# "slow down" page) after about eight. Requests to one host are spaced out, and a refusal waits (Retry-After, at most 30 s)
+# and tries again, so the later sections still get their research.
+POLITE_GAP, POLITE_TRIES, POLITE_WAIT_MAX = 1.5, 4, 30.0
+_last_hit = {}
+
+
+def _polite_get(url, params, headers, ok=None, sleep=None):
+    import requests, time as _t
+    from urllib.parse import urlparse
+    sleep = sleep or _t.sleep
+    host = urlparse(url).netloc; r = None
+    for attempt in range(POLITE_TRIES):
+        gap = POLITE_GAP - (_t.time() - _last_hit.get(host, 0.0))
+        if gap > 0: sleep(gap)
+        r = requests.get(url, params=params, headers=headers, timeout=20); _last_hit[host] = _t.time()
+        if r.status_code == 200 and (ok is None or ok(r)): return r
+        if r.status_code not in (202, 429, 503) and r.status_code != 200: break
+        try: wait = float(r.headers.get("Retry-After") or 0)
+        except ValueError: wait = 0.0
+        sleep(min(POLITE_WAIT_MAX, max(wait, 4.0 * 2 ** attempt)))
+    raise RuntimeError(f"HTTP {r.status_code if r is not None else '?'}")
+
+
 def _log(log, m): (log or print)(m)
 
 
@@ -64,9 +88,7 @@ def _evidence(cfg, page, name):
 
 
 def _ddg(cfg, q):
-    import requests
-    r = requests.get("https://html.duckduckgo.com/html/", params={"q": q}, headers=UA, timeout=20)
-    if r.status_code != 200: raise RuntimeError(f"HTTP {r.status_code}")
+    r = _polite_get("https://html.duckduckgo.com/html/", {"q": q}, UA)   # 202 = its "slow down" page
     return relevant(_clean(re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', r.text, re.S)), q)
 
 
@@ -135,15 +157,13 @@ def _human_check(cfg, page):
 
 def _wikipedia(cfg, q):
     """Wikipedia's public API (no key, no bot check): the lead text of the best-matching articles."""
-    import requests
     h = {"User-Agent": "VideoStudio/1.0 (personal documentary research tool)"}
-    r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "list": "search", "srsearch": q, "srlimit": 4,
-                     "format": "json"}, headers=h, timeout=20)
-    if r.status_code != 200: raise RuntimeError(f"HTTP {r.status_code}")
+    r = _polite_get("https://en.wikipedia.org/w/api.php", {"action": "query", "list": "search", "srsearch": q, "srlimit": 4,
+                    "format": "json"}, h)
     titles = [x["title"] for x in r.json().get("query", {}).get("search", [])]
     if not titles: return []
-    r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "prop": "extracts", "exintro": 1, "explaintext": 1,
-                     "exsentences": 4, "titles": "|".join(titles), "format": "json"}, headers=h, timeout=20)
+    r = _polite_get("https://en.wikipedia.org/w/api.php", {"action": "query", "prop": "extracts", "exintro": 1, "explaintext": 1,
+                    "exsentences": 4, "titles": "|".join(titles), "format": "json"}, h)
     pages = (r.json().get("query", {}).get("pages", {}) or {}).values()
     return relevant([" ".join((p.get("title", "") + ": " + p.get("extract", "")).split()) for p in pages if p.get("extract")], q)[:4]
 
@@ -191,43 +211,45 @@ def _copilot(cfg, q, timeout=90):
 ROUTES = {"wikipedia": _wikipedia, "duckduckgo": _ddg, "bing": _bing, "copilot": _copilot, "google": _google}
 
 
-def search(cfg, query, log=None):
-    """-> (snippets, route). Never raises; ([], "") when every route is resting or failed."""
-    st = _load(cfg); now = time.time()
-    rr = int(st.get("next", 0)) % len(ROTATION)
-    order = list(ROTATION[rr:] + ROTATION[:rr])
-    st["next"] = (rr + 1) % len(ROTATION)
-    g = st.get("google", {})
-    if now - float(g.get("last", 0)) >= GOOGLE_MIN_GAP: order.append("google")   # last resort, rarely
-    result, used = [], ""
-    for name in order:
-        rest = st.get(name, {}).get("rest_until", 0)
-        if now < rest:
-            _log(log, f"    search {name}: resting until {time.strftime('%H:%M', time.localtime(rest))}"); continue
-        rec = st.setdefault(name, {})
-        if name == "google": rec["last"] = now
-        try:
-            snippets = ROUTES[name](cfg, query)
-            if snippets:
-                rec.update(ok=rec.get("ok", 0) + 1, last_ok=now); result, used = snippets, name; break
-            rec["empty"] = rec.get("empty", 0) + 1
-            _log(log, f"    search {name}: no results; next route")
-        except Exception as e:
-            rest = 24 * 3600 if "human verification" in str(e) else 6 * 3600 if "daily limit" in str(e) else REST[name]
-            rec.update(fail=rec.get("fail", 0) + 1, rest_until=now + rest, why=str(e)[:160])
-            _log(log, f"    search {name}: {str(e)[:100]}; rested {rest // 60} min; next route")
-    _save(cfg, st)
-    _log(log, f"    search: {len(result)} snippet(s)" + (f" via {used}" if used else " (every route failed or resting)"))
-    return result, used
+def search(cfg, query, log=None, llm=None):
+    """-> (snippets, route). Never raises; ([], "") when nothing comes back.
+    owner, 2026-11-18: "for searches, we don't use duck duck... at all. we use deepseek with API key" - every search (QC repair,
+    interview facts, commentary) is DeepSeek's own web search on the same API key as the narration and jokes. No browser
+    profile, Copilot, Bing, DuckDuckGo, Google or Wikipedia fetch from here. (The old routes above are unused.)"""
+    try:
+        if llm is not None: got = _deepseek(llm, query, log)
+        else:
+            from .llm import LLM
+            with LLM(cfg, log or (lambda *_: None), lambda: False) as own: got = _deepseek(own, query, log)
+    except Exception as e:
+        if str(e) in ("stopped", "cancelled"): raise
+        _log(log, f"    search deepseek: {str(e)[:100]}"); got = []
+    _log(log, f"    search: {len(got)} fact(s)" + (" via deepseek" if got else " (none)"))
+    return got, ("deepseek" if got else "")
 
 
-def light(cfg, query, log=None):
-    """Research for the narration's commentary (owner, 2026-11-18): Wikipedia, then DuckDuckGo - plain HTTP only, never a browser
-    profile, Copilot or Google (those are kept for QC repair). -> (snippets, route); ([], "") when both find nothing or fail."""
-    for name, fn in (("wikipedia", _wikipedia), ("duckduckgo", _ddg)):
-        try:
-            got = fn(cfg, query)
-            if got: return got, name
-        except Exception as e:
-            _log(log, f"    research {name}: {str(e)[:80]}")
-    return [], ""
+DEEPSEEK_FACTS = """Search the web for: {q}
+Then list 3 or 4 facts about it from what you found, each one short sentence with the page it came from. Only what the pages
+say; nothing guessed. Reply with JSON: {{"facts": [{{"fact": "...", "url": "..."}}]}}"""
+
+
+def _deepseek(llm, q, log=None):
+    """DeepSeek with its own web search (owner, 2026-11-18: "web search is fully supported; it just needs the tool
+    declaration") on the same API key as the narration and jokes. -> the facts (the source URLs are logged)."""
+    if llm is None: return []
+    j = llm.trace("research facts").chat_json("You are a careful fact checker. Reply with JSON only.", DEEPSEEK_FACTS.format(q=q),
+                                              max_tokens=1500, web=True)
+    out, urls = [], []
+    for x in ((j.get("facts") if isinstance(j, dict) else j) or []):   # (sometimes the bare list)
+        f = x.get("fact") if isinstance(x, dict) else x
+        if f and len(str(f).split()) >= 5: out.append(" ".join(str(f).split()))
+        if isinstance(x, dict) and x.get("url"): urls.append(str(x["url"]))
+    urls = urls or list(getattr(llm, "last_sources", []) or [])
+    if urls: _log(log, "    sources: " + ", ".join(urls[:4]))
+    return out[:4]
+
+
+def light(cfg, query, log=None, llm=None):
+    """Research for the narration's commentary (owner, 2026-11-18): the same DeepSeek call as every search - the way the jokes
+    are written is the way the commentary's facts are found. -> (snippets, route); ([], "") when nothing comes back."""
+    return search(cfg, query, log, llm=llm)

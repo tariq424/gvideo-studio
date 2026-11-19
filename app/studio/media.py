@@ -48,3 +48,11 @@ def frames_strip(video, out, n=3):
     args = sum([["-i", p] for p in parts], [])
     ff(*args, "-filter_complex", "".join(f"[{i}]" for i in range(n)) + f"hstack=inputs={n}", out)
     for p in parts: os.remove(p)
+
+
+# owner, 2026-11-19: "this female voice sounds distant and tinny. We want audio to stand out, rich and convincing."
+# The narration used to get only +2 dB at 120 Hz before levelling. A broadcast voice chain instead: rumble cut, body (140 Hz),
+# less boxiness (350 Hz), presence (3.2 kHz), a little air, tamed sibilance, gentle 3:1 compression, then -16 LUFS.
+VOICE_FX = ("highpass=f=70,equalizer=f=140:t=q:w=0.9:g=3.5,equalizer=f=350:t=q:w=1.2:g=-2,equalizer=f=3200:t=q:w=1.2:g=2.5,"
+            "treble=g=1.5:f=9000,deesser=i=0.4,acompressor=threshold=-20dB:ratio=3:attack=8:release=150:makeup=2,"
+            "loudnorm=I=-16:TP=-1.5:LRA=9")
