@@ -69,3 +69,17 @@ app/cloned_voice_worker.py, app/studio/tts.py, app/studio/pipeline.py, app/studi
 
 American Narrator's existing private GitHub repository is https://github.com/tariq424/american-narrator. This Video Studio integration belongs in video-studio-test. This checkpoint is intentionally incomplete and documents the remaining validation.
 
+
+## Update from Claude, 2026-11-19, after Codex's handoff (before the reboot)
+
+Done in `app/studio/tts.py` and `app/cloned_voice_worker.py`. The code compiles and the readiness checks pass. NO audio test has been run since; the system was unstable.
+- **Item 8 (true batch):** `cloned_voice_worker.py` now loads MeloTTS, BERT and OpenVoice and extracts the reference embedding once for the whole batch. Video Studio converts the reference and output with its own ffmpeg (`media.ff`), not ffmpeg on PATH.
+- **Item 7 (cancel and cleanup):** the American worker runs with `Popen`; Stop kills it, and the process exits after the batch, which frees the GPU. Original Accent unloads VoiceStudio's model (`/model/unload/{id}` + `/system/flush-memory`) after every batch, including on failure.
+- **Item 6 (preflight):** `tts.cloned_ready()`.
+  - Original: VoiceStudio health, and starts `VoiceStudio.exe` if it's closed (waits up to 120 s). Also checks that the profile exists by name.
+  - American: worker, VoxCPM2 Python, model cache, voice sample.
+  - The job stops with the reason; there's never a silent switch to another voice.
+- **4,096-character limit:** text longer than 3,800 characters is split between sentences and the takes are joined. Text is never cut.
+- **Settings keys (defaults in code):** voicestudio_url, voicestudio_exe, voicestudio_profile, voxcpm_python, narrator_cache, narrator_ref, narrator_speed, narrator_tau, my_original_wpm, my_american_wpm.
+- **Pace:** both voices currently assume 150 wpm for sizing Shorts. Measure each with one paragraph after the reboot and set the defaults in `tts.CLONED`.
+- **Still open after the reboot:** items 1–5 (the VoxCPM2 "sidecar closed pipe mid-generate" crash on the first Original request) and item 9 (end-to-end through Long and Short, plus resume).
