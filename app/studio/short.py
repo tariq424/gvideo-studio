@@ -1246,7 +1246,7 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     pf = out.with_suffix(".json"); pf.write_text(json.dumps({"g": g, "secs": secs, "w": size[0], "h": size[1]}), encoding="utf-8")
     tmp = out.with_name(out.stem + "_tmp.mp4")
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Recon", str(tmp), f"--props={pf}", f"--gl={_gl(cfg)}",
-           f"--concurrency={render_concurrency(cfg)}", "--jpeg-quality=92", "--crf=18", "--log=error"]
+           *render_flags(cfg), "--jpeg-quality=92", "--crf=18", "--log=error"]
     for attempt in range(3):
         p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
         if p.returncode == 0 or BROWSER_FLAKE not in (p.stdout + p.stderr) or attempt == 2: break
@@ -1311,18 +1311,44 @@ def render_browser_args(cfg, log=print):
     return []
 
 
-def render_concurrency(cfg):
-    """Remotion workers. A number is an override. Otherwise ("auto", or an old "75%") it follows free memory: percentage fan-out
-    once exhausted RAM with many 1080x1920 decoders; 6 workers measured +4.5 GB (Nov 8), so 6 with >= 8 GB free, 4 with >= 5 GB,
-    else 2."""
+def render_concurrency(cfg, log=None, job=None):
+    """Remotion workers. A number in short_concurrency overrides. Otherwise render_workers_auto (4).
+    Benchmark 2026-11-19 (16-thread CPU, 32 GB, 1080p explainer, frame cache capped at 2 GB): 2 workers 90 frames/min, 4 workers
+    178, 6 workers 120, 8 workers 133. More than 4 workers compete for video decoding. With the cache capped, RAM barely depends
+    on workers (+4.7 GB at 2, +5.4 GB at 4). The old rule read free RAM once and fell to 2 whenever desktop apps held memory: a
+    68-min video then took ~7 h at 12% CPU. Low RAM is now reported to the owner (job page + log) instead of silently halving the
+    speed; only below render_floor_free_gb (3) does it use 2 workers."""
     value = str(cfg.get("short_concurrency", "auto")).strip()
     if value.isdigit(): return int(value)
-    try:
-        import psutil
-        free = psutil.virtual_memory().available / 2**30
-    except Exception:
-        return 2
-    return 6 if free >= 8 else 4 if free >= 5 else 2
+    best = int(cfg.get("render_workers_auto", 4))
+    from . import tts
+    ram, _ = tts.memory_headroom()
+    need, floor = float(cfg.get("render_min_free_gb", 6)), float(cfg.get("render_floor_free_gb", 3))
+    n = best if ram >= floor else min(best, 2)
+    warn = ""
+    if ram < need:
+        warn = (f"rendering with {ram:.1f} GB free RAM (wants {need:.0f} GB){'; workers cut to ' + str(n) if n < best else ''}. "
+                f"Closing apps speeds it up: {tts.memory_hogs()}")
+    if log:
+        log(f"  Render workers: {n} (free RAM {ram:.1f} GB; frame cache {frame_cache_gb(cfg):g} GB)")
+        if warn: log("  LOW RESOURCES: " + warn)
+    if job is not None:
+        try:
+            from .pipeline import Job
+            Job(job).save(resource_warning=warn)
+        except Exception: pass
+    return n
+
+
+def frame_cache_gb(cfg):
+    return float(cfg.get("render_frame_cache_gb", 2))
+
+
+def render_flags(cfg, log=None, job=None):
+    """Remotion worker + frame-cache flags for every render. Without the cap the OffthreadVideo cache grows into free RAM
+    (+8.5 GB at 2 workers measured), which is what starved the rest of the PC."""
+    return [f"--concurrency={render_concurrency(cfg, log, job)}",
+            f"--offthreadvideo-cache-size-in-bytes={int(frame_cache_gb(cfg) * 2**30)}"]
 
 
 def do_render(job, plan, cfg, meta, log, stop):
@@ -1331,9 +1357,9 @@ def do_render(job, plan, cfg, meta, log, stop):
     out_dir = job / "output"; out_dir.mkdir(exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"]).strip("_")[:60] or "short"
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
-    conc = render_concurrency(cfg)
+    flags = render_flags(cfg, log, job); conc = int(flags[0].split("=")[1])
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
-           f"--concurrency={conc}", "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
+           *flags, "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
     browser_args = render_browser_args(cfg, log)
     cmd.extend(browser_args)
     on_shell = any("chrome-headless-shell" in a for a in browser_args)

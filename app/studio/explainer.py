@@ -201,7 +201,7 @@ def render(job, plan, cfg, meta, log, stop=lambda: False, out_name=None):
     slug = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"])[:60].strip("_") or "explainer"
     final = o / (out_name or f"{slug}_explainer_1080p.mp4"); tmp = o / "_explainer_rendering.mp4"
     cmd = [short._npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'build' / 'public'}",
-           f"--props={_render_props(job, cfg, log, stop)}", f"--concurrency={__import__('studio.short', fromlist=['x']).render_concurrency(cfg)}",
+           f"--props={_render_props(job, cfg, log, stop)}", *short.render_flags(cfg, log, job),
            "--jpeg-quality=100", "--crf=16", "--log=info", f"--gl={short._gl(cfg)}"]
     log(f"Rendering the explainer with Remotion ({total / 60:.1f} min of video)...")
     for attempt in range(3):

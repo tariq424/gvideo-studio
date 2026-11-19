@@ -31,14 +31,19 @@
 - Pictures: broll 2 h, stills 2 h (Cloudflare + Hugging Face free quotas exhausted, so ChatGPT made every still, ~60 s each).
 
 **Next (owner-approved order)**
-0. (after reboot) Own voices: see CLAUDE_VOXCPM2_HANDOFF.md (American Accent works; Original Accent crashes in VoxCPM2 load).
-   Render-worker benchmark so far (job 20261119_061158, 1080p, frames 30000+): 2 workers = 119 frames/min and +8.5 GB RAM,
-   mostly Remotion's OffthreadVideo frame cache, which by default grows into free RAM. Plan: pass
-   --offthreadvideo-cache-size-in-bytes (about 2 GB) and size workers by CPU (8 on 16 threads), checked against that capped need;
-   rerun the 2-vs-6 benchmark on a clean boot first.
-1. Render workers: size them by what the render needs, not by free RAM with desktop apps open; log + warn the owner
-   when resources are low.
-2. Length: "Auto" = 15 min suggested; the slider gets the same checkbox; the video at least fills the chosen length, no cap.
+Done after the reboot (2026-11-19 evening):
+- Own voices work. The Original Accent crash was Windows running out of commit memory while VoxCPM2 loaded its 4.6 GB model,
+  now guarded (waits for 6 GB RAM / 12 GB commit, else stops naming apps to close). American Accent no longer stops on
+  words missing from its dictionary. See CLAUDE_VOXCPM2_HANDOFF.md. Paces: Original 137 wpm (~4x real time), American 165 wpm.
+- Render workers. Benchmark, 600 frames of job 20261119_061158, frame cache capped at 2 GB:
+  2 workers 90 frames/min (+4.7 GB) | 4 workers 178 (+5.4 GB) | 6 workers 120 (+4.8 GB) | 8 workers 133 (+6.2 GB);
+  4 workers with a 4 GB cache: 126. Earlier, uncapped, 2 workers: 119 frames/min and +8.5 GB.
+  New rule (`short.render_concurrency` / `render_flags`): 4 workers and a 2 GB cache on every render. Free RAM under 6 GB
+  logs LOW RESOURCES and sets the job's resource_warning (shown on the job page); only under 3 GB does it drop to 2 workers.
+- Length policy DONE: Auto = ~15 min (auto_target_min); a set length (slider 3-120 or any number) is a minimum; either goes
+  longer ONLY when the outline names essential information that would be dropped (over_reason, logged); per-job checkbox
+  "go longer only if essential" (length_flex); a short script is expanded with real detail (fit_length), never padded.
+  Root cause of the all-day job: auto length made 68.5 min from a 132-min source (typical jobs 14-27 min, 3-4 h).
 3. Beat editor window (from the ladder panel's per-beat row): scrubber, the beat's STT text and prompts, rung dropdown,
    render that rung or drop/link own video or still (stills get camera moves: overhead, dolly, pan, zoom), Discard or
    Splice only that beat. A "please wait" modal with OK when the pipeline is busy.

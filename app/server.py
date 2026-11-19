@@ -95,8 +95,8 @@ def create():
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
     try: mins, ssec = float(b.get("minutes", 0) or 0), float(b.get("short_secs", 165) or 165)
     except (TypeError, ValueError): return jsonify(error="Video lengths must be numbers."), 400
-    # 0 = auto (owner, 2026-11-18): the explainer is as long as its content needs; a set length is 3 to 60 minutes
-    if mins and not 3 <= mins <= 60: return jsonify(error="Long video length must be Auto, or 3 to 60 minutes."), 400
+    # 0 = auto (~15 min, longer only when essential); a set length is a minimum of 3 minutes or more, no cap (owner, 2026-11-19)
+    if mins and mins < 3: return jsonify(error="Long video length must be Auto, or at least 3 minutes."), 400
     if b.get("mode") != "smoke" and not 120 <= ssec <= 180: return jsonify(error="Short length must be 2:00 to 3:00."), 400
     from studio import debug as _dbg
     dbg_on = str(b.get("debug", "")).lower() in ("true", "1", "on")
@@ -119,6 +119,7 @@ def create():
                             f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
                             b.get("visual_review") or config.load().get("visual_review_default", "never"), dbg_on=dbg_on, bps=bps, own_clips=own,
                             tts_engine=b.get("tts_engine", ""), audience=str(b.get("audience") or "").lower(),
+                            length_flex=str(b.get("length_flex", "1")).lower() not in ("0", "false", "off", "no"),
                             newsroom=str(b.get("newsroom", "")).lower() in ("1", "true", "yes", "on"))   # Newsroom jobs queue ahead of hand jobs
     except ValueError as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(id=jid)

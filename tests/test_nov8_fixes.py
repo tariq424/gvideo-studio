@@ -116,16 +116,23 @@ def test_fact_check_gets_the_verified_place_notes(tmp_path):
     assert "VERIFIED PLACE NOTES" in sent[0] and "Royal Naval Dockyard" in sent[0]
 
 
-def test_render_workers_follow_free_memory(monkeypatch):
-    from studio import short
-    import psutil
-    class VM:
-        def __init__(self, gb): self.available = gb * 2**30
+def test_render_workers_stay_at_the_measured_best_and_warn_when_ram_is_low(monkeypatch, tmp_path):
+    """2026-11-19: 4 workers measured fastest; low RAM is reported to the owner instead of silently halving the speed."""
+    from studio import short, tts
+    from studio.pipeline import Job
     assert short.render_concurrency({"short_concurrency": "3"}) == 3   # a number overrides
-    for gb, n in ((12, 6), (6, 4), (3, 2)):
-        monkeypatch.setattr(psutil, "virtual_memory", lambda gb=gb: VM(gb))
-        assert short.render_concurrency({"short_concurrency": "auto"}) == n
+    logs = []
+    for gb, n, warned in ((12, 4, False), (5, 4, True), (2, 2, True)):
+        monkeypatch.setattr(tts, "memory_headroom", lambda gb=gb: (gb, 40.0))
+        monkeypatch.setattr(tts, "memory_hogs", lambda n=5: "chrome.exe 6.0 GB")
+        (tmp_path / "state.json").write_text("{}", encoding="utf-8")
+        assert short.render_concurrency({"short_concurrency": "auto"}, logs.append, tmp_path) == n
         assert short.render_concurrency({"short_concurrency": "75%"}) == n   # old setting means auto
+        w = Job(tmp_path).state.get("resource_warning")
+        assert bool(w) == warned and (not warned or "chrome.exe" in w)
+    flags = short.render_flags({"render_frame_cache_gb": 2})
+    assert flags[1] == f"--offthreadvideo-cache-size-in-bytes={2 * 2**30}"
+
 
 
 def test_headless_shell_first_installed_chrome_fallback(monkeypatch, tmp_path):

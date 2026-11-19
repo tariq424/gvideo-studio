@@ -90,7 +90,12 @@ DEFAULTS = {
     "skip_faceless_source": True,     # Shorts: a source clip with people but no face in it (hands / torsos) gives way to a picture (owner, 2026-11-17)
     "research_commentary": True,      # before each joke: a little web research on the topic (Wikipedia, DuckDuckGo) -> tidbit + opinion (owner, 2026-11-18)
                                       # "legacy" = the old small CSS zoom/parallax in Remotion (owner made framed the default, 2026-11-16).
-    "short_concurrency": "auto",      # Remotion workers: auto = by free RAM (2/4/6); a number overrides (studio/short.py)
+    "short_concurrency": "auto",      # Remotion workers: auto = render_workers_auto; a number overrides (studio/short.py)
+    "auto_target_min": 15,            # Auto length: about this many minutes, longer only when essential (writer.length_target)
+    "render_workers_auto": 4,         # best measured on this PC (2026-11-19: 4 workers 178 frames/min; 2 -> 90, 6 -> 120, 8 -> 133)
+    "render_frame_cache_gb": 2,       # Remotion OffthreadVideo cache cap (uncapped it grows into free RAM: +8.5 GB seen)
+    "render_min_free_gb": 6,          # below this free RAM at render start: LOW RESOURCES warning on the job page
+    "render_floor_free_gb": 3,        # below this: 2 workers
     "remotion_headless_shell": True,  # render in Remotion's headless Chrome (2x faster, Nov 8); the installed Chrome is the fallback
     "visual_review_default": "never",  # jobs that don't say: never pause for unsure beats, decide on my own (auto | every | never)
     "pause_on_questions": False,     # skip review by default; True = pause only when the fact-check raised questions

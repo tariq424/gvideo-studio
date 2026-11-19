@@ -40,6 +40,6 @@ class StockValidationTests(unittest.TestCase):
     short.render_browser_args({'remotion_browser_executable':str(browser)+'missing'})
  def test_concurrency(self):
   for value in ['75%','100%','25%','auto']:   # never a percentage fan-out: bounded by free RAM (Nov 8)
-   self.assertIn(short.render_concurrency({'short_concurrency':value}),(2,4,6))
+   self.assertIn(short.render_concurrency({'short_concurrency':value}),(2,4))   # measured best 4; 2 only when RAM is very low
   self.assertEqual(short.render_concurrency({'short_concurrency':1}),1)
 if __name__=='__main__':unittest.main()

@@ -230,7 +230,7 @@ class Studio:
 
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
                mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None,
-               own_clips=None, tts_engine="", audience="", newsroom=False):
+               own_clips=None, tts_engine="", audience="", newsroom=False, length_flex=True):
         smoke = mode == "smoke"   # pipeline check: a ~30-second Short (about 75 words); real Shorts keep the 2:00 minimum
         if smoke: mode, short_secs = "short", SMOKE_SECS
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -254,8 +254,9 @@ class Studio:
             j.save(my_clips=mc); j.log(f"Your clips: {len(mc)} file(s)" + (" with a placement note" if (own_clips.get("hints") or "").strip() else ""))
         if tts_engine in ("kokoro", "wanGP", "my_original", "my_american"): j.save(tts_engine=tts_engine)
         if audience in writer.AUDIENCE: j.save(audience=audience)
+        j.save(length_flex=bool(length_flex))   # a set length may go longer only when essential (owner, 2026-11-19)
         what = url or (f"file {up}" if up else "pasted text")
-        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {(f"{float(minutes):g} min" if float(minutes or 0) > 0 else "auto length")}, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
+        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {(f"{float(minutes):g} min" if float(minutes or 0) > 0 else f"auto ~{config.load().get('auto_target_min', 15):g} min")}, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
 
     def create_interview(self, src, context="", extras=None, thanks="", back_camera=True, minutes=15, my_voice=False):
         """Your own interview footage (owner, 2026-11-08): the real conversation leads - a preview of later moments, background
@@ -496,6 +497,7 @@ class Studio:
         j = self.job(jid); s = j.state; cfg = config.load()
         if s.get("tts_engine") in ("kokoro", "wanGP", "my_original", "my_american"): cfg["tts_engine"] = s["tts_engine"]   # the job's own narration choice
         if s.get("kokoro_voice"): cfg["kokoro_voice"] = s["kokoro_voice"]   # picked by subject once (tts.pick_voice), kept on resume
+        cfg["length_flex"] = bool(s.get("length_flex", True))   # the job's own "may go longer when essential"
         if s.get("audience") in writer.AUDIENCE: cfg["audience"] = s["audience"]; cfg["_audience_from"] = "job"   # the job's own audience (script prompts)
         if s.get("cancelled") and s.get("status") == "stopped": return   # cancelled while it waited in the queue
         self.current = jid

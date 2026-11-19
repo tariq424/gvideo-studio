@@ -135,9 +135,10 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp){display:none}
    <label>Which clip goes where (optional)</label><textarea id="cliph" data-testid="clip-hints" rows="2" placeholder="clip 1 is the church exterior, clip 2 is the interior through bars   — or —   clip1=beat3, clip2=beat5,6"></textarea>
    <div class="mut" style="font-size:12.5px">Clips are numbered in the order chosen (uploads first, then paths). Beats your footage doesn't cover get the usual generated visuals; you can move clips in the timeline editor.</div></details></div>
   <div id="m_short"><label>Short length: <b id="sv">2:45</b> (YouTube Shorts max is 3:00)</label><input id="ssec" data-testid="short-length" aria-label="Short length" type="range" min="120" max="176" step="5" value="165" oninput="sv.textContent=fmt(+this.value)" onchange="sv.textContent=fmt(+this.value)" style="width:100%"></div>
-  <div id="m_long"><label>Long video length: <b id="mv">Auto</b></label>
-   <label style="display:block;font-size:13px"><input type="checkbox" id="minauto" data-testid="long-length-auto" checked onchange="$('min').disabled=this.checked;mv.textContent=this.checked?'Auto':$('min').value+' minutes'"> Auto: as long as the content needs (never squeezed)</label>
-   <input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="3" max="60" value="15" disabled oninput="mv.textContent=this.value+' minutes'" onchange="mv.textContent=this.value+' minutes'" style="width:100%">
+  <div id="m_long"><label>Long video length: <b id="mv">Auto (~15 min)</b></label>
+   <label style="display:block;font-size:13px"><input type="checkbox" id="minauto" data-testid="long-length-auto" checked onchange="lenUi()"> Auto: about 15 minutes, longer only when essential information would otherwise be dropped</label>
+   <div class="row" style="align-items:center;gap:8px"><input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="3" max="120" value="15" disabled oninput="$('minn').value=this.value;lenUi()" style="flex:1"><input id="minn" data-testid="long-length-number" aria-label="Long video length in minutes" type="number" min="3" step="1" value="15" disabled oninput="if(+this.value<=120)$('min').value=this.value;lenUi()" style="width:80px"> min</div>
+   <label style="display:block;font-size:13px"><input type="checkbox" id="minflex" data-testid="long-length-flex" checked disabled onchange="lenUi()"> At least this long; go longer only if essential information would otherwise be dropped</label>
    <label><input id="caps" data-testid="toggle-captions" type="checkbox" checked> Animated captions with icons</label>
    <label><input id="pres" data-testid="toggle-presenter" type="checkbox"> On-screen presenter (small corner window, experimental)</label></div>
   <label>Narration</label><select id="ttse" data-testid="narration-engine" aria-label="Narration"><option value="">Settings default (Kokoro, falls back to WanGP)</option><option value="kokoro">Kokoro (fast preset voice)</option><option value="my_original">My Voice – Original Accent (local VoxCPM2)</option><option value="my_american">My Voice – American Accent (local OpenVoice)</option><option value="wanGP">WanGP cloned voice (slow)</option></select>
@@ -156,6 +157,7 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp){display:none}
 <section><div class="card" id="detail"><span class="mut">Select a job to see progress.</span></div></section>
 </main>
 <script>
+function lenUi(){const a=$('minauto').checked;$('min').disabled=a;$('minn').disabled=a;$('minflex').disabled=a;const m=Math.max(3,+$('minn').value||15);mv.textContent=a?'Auto (~15 min)':(m+' minutes'+($('minflex').checked?' or more if essential':' exactly'))}
 let sel=null, stages=[], planCache=null, editing=false;
 const EMBED=new URLSearchParams(location.search).has('embed');
 const POPUP=new URLSearchParams(location.search).get('popup')==='edit';
@@ -186,7 +188,7 @@ async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn')
   for(const [a,v] of [['mode','interview'],['src_path',$('ivp').value.trim()],['interview_context',$('ivc').value],['interview_extras',$('ivx').value],['interview_thanks',$('ivt').value],['interview_minutes',$('ivm').value],['interview_back_camera',$('ivb').checked?'1':'0'],['interview_my_voice',$('ivv').checked?'1':'0']])fd.append(a,v);
   try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;$('ivp').value='';$('ivc').value='';$('ivx').value='';$('ivt').value='';$('cmsg').textContent='';STARTING=false;loadJobs()}catch(e){$('cmsg').textContent=e.message;STARTING=false;$('makebtn').disabled=false}
   return}
- const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('minauto').checked?0:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,tts_engine:$('ttse').value,audience:$('aud').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
+ const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('minauto').checked?0:$('minn').value,length_flex:$('minauto').checked||$('minflex').checked?'1':'0',presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,tts_engine:$('ttse').value,audience:$('aud').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
  if($('s_clips')&&$('s_clips').style.display!='none'){for(const cf of $('clipf').files)fd.append('clips',cf);fd.append('clip_paths',$('clipp').value);fd.append('clip_hints',$('cliph').value)}

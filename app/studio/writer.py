@@ -63,6 +63,7 @@ Build the outline:
 Reply with ONLY JSON:
 {{"title":"video title, max 70 chars","subtitle":"one-line hook for the title card",
  "youtube_description":"2-4 sentences for YouTube; credit {channel} and the original episode",
+ "over_reason":"empty, or - only when the budgets go past the target length - the essential points that would be lost at the target",
  "sections":[{{"title":"...","points":["..."],"words":120}}]}}
 
 NOTES:
@@ -315,42 +316,66 @@ def _with_extra(notes, extra):
     long source the source notes alone fill that (Nov 6: the counted verdict was cut off and never reached the script)."""
     return (extra.strip() + "\n\n# Source notes\n\n" + notes) if extra.strip() else notes
 
-AUTO_MIN, AUTO_MAX = 3.0, 60.0   # minutes: the floor and the sanity ceiling of an auto-length explainer
+AUTO_MIN, AUTO_MAX = 3.0, 60.0   # minutes: kept for older callers (auto_words)
+# Length policy (owner, 2026-11-19, after a 132-min interview became a 68.5-min explainer that took all day):
+#   Auto (minutes 0) = about auto_target_min (15) minutes. A set length (any number, no cap) is a MINIMUM: the video fills it.
+#   Either may go longer ONLY when fitting would drop essential information - the outline must name what would be lost
+#   ("over_reason"); without a reason the budgets are scaled back to the target. A set length can forbid going longer
+#   (job option length_flex off). Never padding: a short script is expanded with real detail from the source.
 
 
 def auto_words(cfg, transcript):
-    """minutes 0 = auto (owner, 2026-11-18): the explainer is as long as its content needs, never squeezed into a slot. A guide
-    only (for the notes and the outline's section count): about 40% of the source's words, between AUTO_MIN and AUTO_MAX min."""
     n = len(str(transcript or "").split())
     return int(min(AUTO_MAX * cfg["wpm"], max(AUTO_MIN * cfg["wpm"], n * 0.4)))
 
 
-def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
+def length_target(cfg, minutes):
+    """-> (target minutes, may go longer when essential, auto?)"""
     auto = not minutes or float(minutes) <= 0
-    words = auto_words(cfg, transcript) if auto else int(minutes * cfg["wpm"])
-    if auto: minutes = round(words / cfg["wpm"], 1)
+    if auto: return float(cfg.get("auto_target_min", 15)), True, True
+    return float(minutes), bool(cfg.get("length_flex", True)), False
+
+
+def size_budgets(secs, words, flex, over_reason, log, wpm):
+    """Section budgets -> at least `words` in total; more only with a stated essential reason (and flex). Returns the total."""
+    tot = sum(max(30, int(s.get("words") or words / max(1, len(secs)))) for s in secs) or 1
+    for s in secs: s["words"] = max(30, int(s.get("words") or words / max(1, len(secs))))
+    reason = str(over_reason or "").strip()
+    if tot < words:
+        for s in secs: s["words"] = max(30, int(s["words"] * words / tot))
+        log(f"  length: outline budgets {tot} words raised to the {words}-word minimum (~{words / wpm:.0f} min)")
+    elif tot > words * 1.08 and flex and reason:
+        log(f"  length: going past the target to ~{tot / wpm:.0f} min because fitting ~{words / wpm:.0f} min would drop: {reason[:300]}")
+    elif tot > words * 1.08:
+        for s in secs: s["words"] = max(30, int(s["words"] * words / tot))
+        log(f"  length: outline budgets {tot} words scaled to the {words}-word target (~{words / wpm:.0f} min)"
+            + ("" if flex else "; going longer is off for this job") + ("" if reason or not flex else "; no essential point named for going longer"))
+    return sum(s["words"] for s in secs)
+
+
+def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
+    minutes, flex, auto = length_target(cfg, minutes)
+    words = int(minutes * cfg["wpm"])
     spv = cfg["seconds_per_visual"]
     title, channel = meta.get("title") or "the episode", meta.get("channel") or meta.get("uploader") or "the host"
     with LLM(cfg, log, stop) as llm:
         if workdir: llm.trace_dir = Path(workdir).parent / "prompts"
         meta = dict(meta, verified_notes=verified_notes(workdir))
-        log(f"Writing script with {llm.name} (" + (f"auto length: as long as the content needs, ~{words} words as a guide" if auto
-            else f"target {words} words") + ")...")
+        log(f"Writing script with {llm.name} (" + (f"auto length: about {minutes:g} min, {words} words" if auto
+            else f"at least {minutes:g} min, {words} words") + ("; longer only if essential" if flex else "; not longer") + ")...")
         log_audience(cfg, log)
         # 1. notes
         notes_txt = make_notes(llm, meta, transcript, words, log, stop, workdir)
         # 2. outline
         nsec = max(4, round(minutes * 0.6))
-        if auto:   # the content decides: a wide range of sections, budgets that add up to whatever the material needs
-            length_line = (f"an explainer video whose length is set by its content (as a rough guide about {words} words of narration, "
-                           "~" + f"{minutes:.0f} minutes; go longer when the material has more strong points, shorter when it has fewer)")
-            budget_rule = ("together the budgets are as long as the material needs: keep every strong, non-repeating point and "
-                           "the explanation it needs; never pad, never drop a good point to save time")
-            lo, hi = max(3, round(nsec * 0.6)), max(nsec + 2, round(nsec * 1.6))
+        length_line = f"a {minutes:g}-minute explainer video (about {words} words of narration)"
+        if flex:
+            budget_rule = (f"all budgets add up to about {words} (never less). Go past {words} ONLY if fitting into {minutes:g} minutes "
+                           "would drop ESSENTIAL information - a key fact, argument or explanation without which the video is wrong or "
+                           "incomplete - and then name those points in \"over_reason\". Interesting-but-optional points are cut, never padded")
         else:
-            length_line = f"a {minutes:g}-minute explainer video (about {words} words of narration)"
-            budget_rule = f"all budgets must add up to about {words}"
-            lo, hi = max(3, nsec - 2), nsec + 2
+            budget_rule = f"all budgets must add up to about {words}; cut the weakest points to fit"
+        lo, hi = max(3, nsec - 2), nsec + 3
         def chk(o):
             if not o.get("sections") or len(o["sections"]) < 3: raise ValueError("too few sections")
             for s in o["sections"]:
@@ -360,16 +385,8 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
                 hook_words=int(cfg["wpm"] / 3), close_words=int(cfg["wpm"] / 2.5), nsec_lo=lo,
                 nsec_hi=hi, notes=notes_txt), max_tokens=8000, check=chk)
         secs = o["sections"]
-        tot = sum(int(s.get("words") or 0) for s in secs) or 1
-        if auto:   # the outline's own budgets stand (within the sanity ceiling); the total is what the content needs
-            for s in secs: s["words"] = max(30, int(s.get("words") or words / len(secs)))
-            tot = sum(s["words"] for s in secs)
-            if tot > AUTO_MAX * cfg["wpm"]:
-                for s in secs: s["words"] = max(30, int(s["words"] * AUTO_MAX * cfg["wpm"] / tot))
-            words = sum(s["words"] for s in secs)
-            log(f"  auto length: the outline needs {len(secs)} sections, {words} words (~{words / cfg['wpm']:.1f} min)")
-        else:
-            for s in secs: s["words"] = max(30, int((int(s.get("words") or tot / len(secs))) * words / tot))
+        words = size_budgets(secs, words, flex, o.get("over_reason"), log, cfg["wpm"])
+        log(f"  outline: {len(secs)} sections, {words} words (~{words / cfg['wpm']:.1f} min)")
         outline_str = " | ".join(f"{i+1}. {s['title']}" for i, s in enumerate(secs))
         # 3. sections
         total_vis = sum(max(2, round(s["words"] / cfg["wpm"] * 60 / spv)) for s in secs)
@@ -565,15 +582,18 @@ def fit_length(llm, plan, secs, words, cfg, log, stop=None):
     # length policy (2026-10-14): no padding and no trimming for length, unless the script is past the sanity ceiling
     # (25 min for a 15-min target); then the longest sections are cut back towards their budgets until it fits
     w0 = tot()
-    if w0 <= words * SANITY:
-        log(f"  length: {w0} words ({100 * (w0 - words) / words:+.0f}% of the {words}-word target); accepted as written (no padding, no trimming)")
+    floor = words * (1 - TOTAL_TOL)   # owner 2026-11-19: the video at least fills its length (expanded with real detail, never padding)
+    if floor <= w0 <= words * SANITY:
+        log(f"  length: {w0} words ({100 * (w0 - words) / words:+.0f}% of the {words}-word target); accepted as written")
         return plan
-    log(f"  length: {w0} words is past the sanity ceiling ({int(words * SANITY)} words, x{SANITY:.2f} the target): trimming the longest sections")
-    while tot() > words * SANITY and len(done) < len(plan["sections"]):
+    short = w0 < floor
+    if short: log(f"  length: {w0} words is short of the {words}-word minimum: expanding the sections furthest under budget")
+    else: log(f"  length: {w0} words is past the sanity ceiling ({int(words * SANITY)} words, x{SANITY:.2f} the target): trimming the longest sections")
+    while (tot() < floor if short else tot() > words * SANITY) and len(done) < len(plan["sections"]):
         if stop and stop(): raise RuntimeError("stopped")
-        short = False
-        cand = [(i, (b["words"] - _nw(x["vo"])) / b["words"]) for i, (x, b) in enumerate(zip(plan["sections"], secs))
-                if i not in done and not (short and x.get("covered"))]   # a covered (thin) section is never padded
+        cand = [(i, (b["words"] - _nw(x["vo"])) / b["words"]) for i, (x, b) in enumerate(zip(plan["sections"], secs)) if i not in done]
+        if short:   # thin ("covered") sections last: they said their points are used up
+            cand = [c for c in cand if not plan["sections"][c[0]].get("covered")] or cand
         cand = [c for c in cand if (c[1] > 0) == short and abs(c[1]) > 0.04] or [c for c in cand if (c[1] > 0) == short]
         if not cand: break
         i = max(cand, key=lambda c: abs(c[1]))[0]; done.add(i)
