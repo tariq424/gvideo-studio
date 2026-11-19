@@ -58,7 +58,7 @@ def _do_voice_inner(job, plan, cfg, wg, log, stop):
     seed = 9000
     from .pipeline import progress
     from . import tts
-    if tts.engine(cfg) == "kokoro":   # all chunks in one Kokoro run; the per-section concat below is unchanged
+    if tts.is_local(cfg):   # all chunks in one Kokoro run; the per-section concat below is unchanged
         import unicodedata
         items = [(text, d / f"{s['id']}_{ci}.wav") for s in plan["sections"] if not media.ok(d / f"{s['id']}.wav")
                  for ci, text in enumerate(chunks(unicodedata.normalize("NFKD", s["vo"]).encode("ascii", "ignore").decode()))]

@@ -68,16 +68,25 @@ def pick_voice(cfg, title, text, log=print):
 
 
 def engine(cfg):
-    return "kokoro" if str(cfg.get("tts_engine", "kokoro")).strip().lower() == "kokoro" else "wanGP"
+    selected = str(cfg.get("tts_engine", "kokoro")).strip().lower()
+    return selected if selected in ("kokoro", "my_original", "my_american") else "wanGP"
+
+
+def is_local(cfg):
+    return engine(cfg) in ("kokoro", "my_original", "my_american")
 
 
 def try_kokoro(cfg, items, log, tag, stop):
     """Kokoro for these items. -> True when done; False when it failed and tts_fallback lets WanGP take over (logged).
     Raises when it failed and fallback is off (or the job was cancelled)."""
     try:
-        kokoro_batch(cfg, items, log, tag, stop); return True
+        if engine(cfg) in ("my_original", "my_american"):
+            cloned_batch(cfg, items, log, tag, stop)
+        else:
+            kokoro_batch(cfg, items, log, tag, stop)
+        return True
     except Exception as e:
-        if str(e) == "cancelled" or not cfg.get("tts_fallback", True): raise
+        if engine(cfg) in ("my_original", "my_american") or str(e) == "cancelled" or not cfg.get("tts_fallback", True): raise
         log(f"  {tag}: Kokoro failed ({str(e)[:200]}); falling back to WanGP narration (tts_fallback)")
         return False
 
@@ -98,6 +107,12 @@ def kokoro_python(cfg):
 
 def available(cfg):
     """-> "" when Kokoro can run, else why not (shown in the job log)."""
+    if engine(cfg) in ("my_original", "my_american"):
+        if not (APP / "cloned_voice_worker.py").is_file():
+            return "cloned voice worker missing"
+        if engine(cfg) == "my_american" and not Path("F:/audio-transcriber/american-narrator/render.py").is_file():
+            return "American Narrator renderer missing"
+        return ""
     py = kokoro_python(cfg)
     if not py.exists(): return f"the Kokoro environment isn't installed ({py} missing; run install_kokoro in Pinokio)"
     if not WORKER.exists(): return f"{WORKER.name} missing"
@@ -206,3 +221,33 @@ def my_voice(cfg, items, log, tag="your voice", stop=lambda: False):
         media.ff("-i", ov if media.ok(ov, 0.2) else b, "-ar", 48000, "-ac", 2, o)
         ov.unlink(missing_ok=True); b.unlink(missing_ok=True)
     log(f"  {tag}: your voice (OpenVoice) on {len(todo)} part(s) in {time.time() - t0:.0f}s")
+
+
+def cloned_batch(cfg, items, log, tag="voice", stop=lambda: False):
+    todo = [(text, Path(output)) for text, output in items if not media.ok(output)]
+    if not todo:
+        return
+    if stop():
+        raise RuntimeError("cancelled")
+    selected = engine(cfg)
+    request = {"engine": selected, "items": [
+        {"text": text, "out": str(output)} for text, output in todo]}
+    with tempfile.TemporaryDirectory(prefix="studio-cloned-voice-") as folder:
+        path = Path(folder) / "request.json"
+        path.write_text(json.dumps(request), encoding="utf-8")
+        runtime = Path(os.environ["APPDATA"]) / "OmniVoice/engines/voxcpm2/voxcpm2/.venv/Scripts/python.exe"
+        if not runtime.is_file():
+            raise RuntimeError("The local VoiceStudio VoxCPM2 Python environment is missing.")
+        result = subprocess.run(
+            [str(runtime), str(APP / "cloned_voice_worker.py"), str(path)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3600,
+            env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                 "PYTHONIOENCODING": "utf-8"})
+        if result.returncode:
+            raise RuntimeError(f"{selected} narration failed: {(result.stderr or result.stdout)[-800:]}")
+    if stop():
+        raise RuntimeError("cancelled")
+    for _, output in todo:
+        if not media.ok(output, 0.2):
+            raise RuntimeError(f"Cloned voice produced no valid audio for {output.name}")
+    log(f"  {tag}: {selected} rendered {len(todo)} local narration part(s)")

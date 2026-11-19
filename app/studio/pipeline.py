@@ -252,7 +252,7 @@ class Studio:
             except Exception:
                 shutil.rmtree(j.dir, ignore_errors=True); raise
             j.save(my_clips=mc); j.log(f"Your clips: {len(mc)} file(s)" + (" with a placement note" if (own_clips.get("hints") or "").strip() else ""))
-        if tts_engine in ("kokoro", "wanGP"): j.save(tts_engine=tts_engine)
+        if tts_engine in ("kokoro", "wanGP", "my_original", "my_american"): j.save(tts_engine=tts_engine)
         if audience in writer.AUDIENCE: j.save(audience=audience)
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {(f"{float(minutes):g} min" if float(minutes or 0) > 0 else "auto length")}, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
@@ -494,7 +494,7 @@ class Studio:
 
     def _run(self, jid):
         j = self.job(jid); s = j.state; cfg = config.load()
-        if s.get("tts_engine") in ("kokoro", "wanGP"): cfg["tts_engine"] = s["tts_engine"]   # the job's own narration choice
+        if s.get("tts_engine") in ("kokoro", "wanGP", "my_original", "my_american"): cfg["tts_engine"] = s["tts_engine"]   # the job's own narration choice
         if s.get("kokoro_voice"): cfg["kokoro_voice"] = s["kokoro_voice"]   # picked by subject once (tts.pick_voice), kept on resume
         if s.get("audience") in writer.AUDIENCE: cfg["audience"] = s["audience"]; cfg["_audience_from"] = "job"   # the job's own audience (script prompts)
         if s.get("cancelled") and s.get("status") == "stopped": return   # cancelled while it waited in the queue
@@ -613,7 +613,7 @@ class Studio:
                 sp = j.short_plan()
                 if st == "short_stock":
                     from . import tts
-                    kok = tts.engine(cfg) == "kokoro"
+                    kok = tts.is_local(cfg)
                     if "short_voice" not in j.state.get("done", []) and (kok or wg.alive()):
                         # footage (network + DeepSeek + a little GPU) and narration (GPU) run side by side
                         errs = []
@@ -774,9 +774,10 @@ class Studio:
 def _need_tts(wg, cfg):
     """Narration needs WanGP only when the engine is WanGP (tts_engine, the default); Kokoro runs on its own."""
     from . import tts
-    if tts.engine(cfg) == "kokoro":
+    if tts.is_local(cfg):
         why = tts.available(cfg)
         if not why: return
+        if tts.engine(cfg) in ("my_original", "my_american"): raise RuntimeError(why)
         if not cfg.get("tts_fallback", True): raise RuntimeError(f"Narration engine is Kokoro but {why}. Install it, or set tts_engine back to wanGP.")
         cfg["tts_engine"] = "wanGP"   # fallback: this job narrates with WanGP
     _need_wangp(wg)
