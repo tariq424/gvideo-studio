@@ -230,8 +230,8 @@ def my_voice(cfg, items, log, tag="your voice", stop=lambda: False):
 # Settings (defaults below): voicestudio_url, voicestudio_exe, voicestudio_profile, narrator_cache, narrator_ref, voxcpm_python,
 # my_original_wpm / my_american_wpm (pace used to size Shorts). A missing piece stops the job with the reason (never silently
 # another voice: the owner chose this voice for this video).
-CLONED = {"my_original": {"label": "My Voice - Original Accent", "wpm": 150},
-          "my_american": {"label": "My Voice - American Accent", "wpm": 150}}
+CLONED = {"my_original": {"label": "My Voice - Original Accent", "wpm": 137},    # measured 2026-11-19: 136-139 wpm, ~3.4x real time
+          "my_american": {"label": "My Voice - American Accent", "wpm": 165}}    # measured 2026-11-19: 165 wpm, ~1x real time
 CLONED_WORKER = APP / "cloned_voice_worker.py"
 
 
@@ -274,6 +274,53 @@ def _voicestudio_up(cfg, start=True, wait=120):
         try: _vs_get(cfg, "/health"); return True
         except Exception: pass
     return False
+
+
+def memory_headroom():
+    """-> (free RAM GB, free commit GB). Commit = what Windows can still promise (RAM + page file); when it runs out,
+    allocations are refused and PyTorch crashes with an access violation (VoxCPM2 2026-11-14 and 11-19)."""
+    try:
+        import ctypes
+        class MS(ctypes.Structure):
+            _fields_ = [("len", ctypes.c_ulong), ("load", ctypes.c_ulong), ("phys", ctypes.c_ulonglong), ("aphys", ctypes.c_ulonglong),
+                        ("page", ctypes.c_ulonglong), ("apage", ctypes.c_ulonglong), ("virt", ctypes.c_ulonglong),
+                        ("avirt", ctypes.c_ulonglong), ("aext", ctypes.c_ulonglong)]
+        m = MS(); m.len = ctypes.sizeof(MS); ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        return m.aphys / 2**30, m.apage / 2**30
+    except Exception:
+        try:
+            import psutil; v = psutil.virtual_memory(); sw = psutil.swap_memory()
+            return v.available / 2**30, (v.available + sw.free) / 2**30
+        except Exception: return 99.0, 99.0
+
+
+def memory_hogs(n=5):
+    """The biggest memory users by name (for the owner: what to close)."""
+    try:
+        import psutil
+        tot = {}
+        for pr in psutil.process_iter(["name", "memory_info"]):
+            try: tot[pr.info["name"]] = tot.get(pr.info["name"], 0) + pr.info["memory_info"].rss
+            except Exception: pass
+        return ", ".join(f"{k} {v / 2**30:.1f} GB" for k, v in sorted(tot.items(), key=lambda x: -x[1])[:n])
+    except Exception: return ""
+
+
+def wait_for_memory(need_ram, need_commit, log, what, stop=lambda: False, wait=300):
+    """Wait (up to `wait` s) until free RAM and commit cover `what`; else raise with what to close (owner: tell me when
+    resources are low)."""
+    t0, said = time.time(), False
+    while True:
+        ram, com = memory_headroom()
+        if ram >= need_ram and com >= need_commit: return
+        if not said:
+            log(f"  LOW RESOURCES: {what} needs {need_ram:.0f} GB free RAM and {need_commit:.0f} GB free commit; now {ram:.1f} / "
+                f"{com:.1f} GB. Waiting up to {wait // 60} min. Biggest users: {memory_hogs()}"); said = True
+        if stop(): raise RuntimeError("cancelled")
+        if time.time() - t0 > wait:
+            raise RuntimeError(f"Low resources: {what} needs {need_ram:.0f} GB free RAM and {need_commit:.0f} GB free commit "
+                               f"(now {ram:.1f} / {com:.1f} GB). Close some apps ({memory_hogs()}), then press Resume.")
+        time.sleep(15)
 
 
 def cloned_ready(cfg, start=True):
@@ -326,17 +373,26 @@ def cloned_batch(cfg, items, log, tag="voice", stop=lambda: False):
     t0 = time.time()
     if e == "my_original":
         name = cfg.get("voicestudio_profile") or "My Voice - YouTube Narration"
+        # VoxCPM2 loads a 4.6 GB checkpoint through RAM; short commit memory kills its process mid-load (no error, a crash)
+        wait_for_memory(float(cfg.get("voxcpm_need_ram_gb", 6)), float(cfg.get("voxcpm_need_commit_gb", 12)), log,
+                        "My Voice - Original Accent", stop)
         try:
             for i, (t, o) in enumerate(todo, 1):
                 if stop(): raise RuntimeError("cancelled")
                 raws = []
                 for k, piece in enumerate(_takes(t)):   # VoxCPM2 takes at most 4,096 characters: split at sentences, never cut
-                    try:
-                        audio = _vs_post(cfg, "/v1/audio/speech", {"model": "voxcpm2", "voice": name, "input": piece,
-                                                                  "response_format": "wav", "language": "en"})
-                    except Exception as ex:
-                        detail = ex.read().decode("utf-8", "replace")[-300:] if hasattr(ex, "read") else str(ex)[:300]
-                        raise RuntimeError(f"VoiceStudio could not read part {i} ({detail})")
+                    body = {"model": "voxcpm2", "voice": name, "input": piece, "response_format": "wav", "language": "en"}
+                    for attempt in (1, 2):   # its model process can die once (memory); VoiceStudio respawns it on the next call
+                        try: audio = _vs_post(cfg, "/v1/audio/speech", body); break
+                        except Exception as ex:
+                            detail = ex.read().decode("utf-8", "replace")[-300:] if hasattr(ex, "read") else str(ex)[:300]
+                            if attempt == 2 or stop(): raise RuntimeError(f"VoiceStudio could not read part {i} ({detail})")
+                            ram, com = memory_headroom()
+                            log(f"  {tag}: VoiceStudio failed on part {i} ({detail[:120]}); free RAM {ram:.1f} GB, commit {com:.1f} GB;"
+                                " retrying once")
+                            wait_for_memory(float(cfg.get("voxcpm_need_ram_gb", 6)), float(cfg.get("voxcpm_need_commit_gb", 12)),
+                                            log, "My Voice - Original Accent", stop)
+                            time.sleep(10)
                     if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE": raise RuntimeError(f"VoiceStudio returned no WAV for part {i}")
                     raw = o.with_suffix(f".vs{k}.wav"); raw.write_bytes(audio); raws.append(raw)
                 if len(raws) == 1: media.ff("-i", raws[0], "-ar", 48000, "-ac", 2, o)
@@ -363,6 +419,7 @@ def cloned_batch(cfg, items, log, tag="voice", stop=lambda: False):
             tail = []
             for line in p.stdout:
                 tail = (tail + [line.rstrip()])[-30:]
+                if line.startswith("pronounced by letter-to-sound:"): log(f"  {tag}: {line.strip()} (not in the dictionary)")
                 if stop(): p.kill(); raise RuntimeError("cancelled")
                 if line.startswith("part ") and line.split()[1].split("/")[0].isdigit() and int(line.split()[1].split("/")[0]) % 10 == 0:
                     log(f"  {tag}: {line.strip()} in your American-accent voice")

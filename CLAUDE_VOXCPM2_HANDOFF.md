@@ -83,3 +83,26 @@ Done in `app/studio/tts.py` and `app/cloned_voice_worker.py`. The code compiles 
 - **Settings keys (defaults in code):** voicestudio_url, voicestudio_exe, voicestudio_profile, voxcpm_python, narrator_cache, narrator_ref, narrator_speed, narrator_tau, my_original_wpm, my_american_wpm.
 - **Pace:** both voices currently assume 150 wpm for sizing Shorts. Measure each with one paragraph after the reboot and set the defaults in `tts.CLONED`.
 - **Still open after the reboot:** items 1–5 (the VoxCPM2 "sidecar closed pipe mid-generate" crash on the first Original request) and item 9 (end-to-end through Long and Short, plus resume).
+
+## Resolved after the reboot (Claude, 2026-11-19)
+
+**Root cause of "sidecar closed pipe mid-generate": Windows ran out of commit memory, not a VoxCPM2 bug.**
+- **Evidence:** both failures (2026-11-14 18:17 and 2026-11-19 15:45) are APPCRASH 0xc0000005 in VoiceStudio's python.exe, in `c10.dll` and `torch_cpu.dll`, while it loaded the 4.6 GB `model.safetensors`.
+- **Nov 14:** Windows logged "Virtual Memory Minimum Too Low … memory requests for some applications may be denied" 4 s before the crash.
+- **Nov 19:** a Remotion benchmark was using +8.5 GB at the time.
+- **What happens:** a refused allocation crashes PyTorch instead of raising an error.
+- **After the reboot,** with 14 GB of RAM and 55 GB of commit free, it worked every time.
+
+**Fixes in Video Studio (`tts.py`):**
+- `wait_for_memory()`: before the narration, it waits up to 5 min for 6 GB of free RAM and 12 GB of free commit, otherwise stops with "Low resources … close <biggest apps>". Settings: voxcpm_need_ram_gb, voxcpm_need_commit_gb.
+- One automatic retry when VoiceStudio fails on a part; it respawns its model process.
+
+**American Accent bug found and fixed:** the narrator cache's English frontend raises on any word missing from its dictionary ("humanoid"). `cloned_voice_worker.py` now pronounces those words with g2p_en's letter-to-sound model, run from the local `checkpoint20.npz` with numpy. g2p_en itself is never imported, so NLTK never downloads anything. The words are listed in the job log.
+
+**Verified:**
+- Original twice in a row: 136–139 wpm, about 3.4–4× real time. Model unloaded after each batch.
+- American: 165 wpm, about 1× real time.
+- 48 kHz stereo; long path (`render._do_voice_inner`) and Short path (`short._do_voice_inner`), both voices.
+- `tests/test_cloned_voices.py` passes: choice kept on resume, no switch to another voice on failure, memory guard, sentence splits, offline pronunciation.
+
+**Not done:** a full video. Video Studio on 42020 needs a restart to load this.
