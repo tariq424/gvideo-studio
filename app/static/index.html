@@ -138,7 +138,7 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp):not(#scr_rung
   <div id="m_short"><label>Short length: <b id="sv">2:55</b> (YouTube Shorts max is 3:00)</label><input id="ssec" data-testid="short-length" aria-label="Short length" type="range" min="120" max="176" step="5" value="175" oninput="sv.textContent=fmt(+this.value)" onchange="sv.textContent=fmt(+this.value)" style="width:100%"></div>
   <div id="m_long"><label>Long video length: <b id="mv">Auto (~15 min)</b></label>
    <label style="display:block;font-size:13px"><input type="checkbox" id="minauto" data-testid="long-length-auto" checked onchange="lenUi()"> Auto: about 15 minutes, longer only when essential information would otherwise be dropped</label>
-   <div class="row" style="align-items:center;gap:8px"><input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="3" max="120" value="15" disabled oninput="$('minn').value=this.value;lenUi()" style="flex:1"><input id="minn" data-testid="long-length-number" aria-label="Long video length in minutes" type="number" min="3" step="1" value="15" disabled oninput="if(+this.value<=120)$('min').value=this.value;lenUi()" style="width:80px"> min</div>
+   <div class="row" style="align-items:center;gap:8px"><input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="1" max="120" value="15" disabled oninput="$('minn').value=this.value;lenUi()" style="flex:1"><input id="minn" data-testid="long-length-number" aria-label="Long video length in minutes" type="number" min="1" step="1" value="15" disabled oninput="if(+this.value<=120)$('min').value=this.value;lenUi()" style="width:80px"> min</div>
    <label style="display:block;font-size:13px"><input type="checkbox" id="minflex" data-testid="long-length-flex" checked disabled onchange="lenUi()"> At least this long; go longer only if essential information would otherwise be dropped</label>
    <label><input id="ownsrc" data-testid="own-source" type="checkbox"> This is my own video (my footage, my words): no credit to a creator, no "X says", my footage used freely; add research and jokes</label>
   <label><input id="caps" data-testid="toggle-captions" type="checkbox" checked> Animated captions with icons</label>
@@ -159,7 +159,7 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp):not(#scr_rung
 <section><div class="card" id="detail"><span class="mut">Select a job to see progress.</span></div></section>
 </main>
 <script>
-function lenUi(){const a=$('minauto').checked;$('min').disabled=a;$('minn').disabled=a;$('minflex').disabled=a;const m=Math.max(3,+$('minn').value||15);mv.textContent=a?'Auto (~15 min)':(m+' minutes'+($('minflex').checked?' or more if essential':' exactly'))}
+function lenUi(){const a=$('minauto').checked;$('min').disabled=a;$('minn').disabled=a;$('minflex').disabled=a;const m=Math.max(1,+$('minn').value||15);mv.textContent=a?'Auto (~15 min)':(m+' minutes'+($('minflex').checked?' or more if essential':' exactly'))}
 let sel=null, stages=[], planCache=null, editing=false;
 const EMBED=new URLSearchParams(location.search).has('embed');
 const POPUP=new URLSearchParams(location.search).get('popup')==='edit';

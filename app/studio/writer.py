@@ -190,13 +190,16 @@ def audience_key(cfg):
 def audience_line(cfg):
     """The prompt line for this job's audience (cfg["audience"]: the job's choice, else settings.json, else informed)."""
     from . import style
-    return AUDIENCE[audience_key(cfg)] + style.text(cfg) + (OWN_SOURCE if cfg.get("own_source") else "")   # + house style (+ own video)
+    owner = str(cfg.get("owner_name") or "Tariq Hasnain")
+    never = f"\nNever say the name {owner} (the channel owner) anywhere in the narration."   # owner, 2026-11-20: as a rule
+    return AUDIENCE[audience_key(cfg)] + style.text(cfg) + never + (OWN_SOURCE if cfg.get("own_source") else "")
 
 
 # owner, 2026-11-20: "this entire video is my own. we just need to augment it with more research and jokes"
 OWN_SOURCE = ("\nTHIS IS THE CHANNEL OWNER'S OWN VIDEO: write in the channel's own voice, as first-hand material. Never attribute "
               "it (no \"X says\", \"X's breakdown\", \"according to the video\"), never name its creator, never call it a source, "
-              "episode or interview. Keep its points and numbers, and deepen them with research, context and jokes.")
+              "episode or interview. Keep its points and numbers, and deepen them with research, context and jokes. Assume it has NO "
+              "hook: always open with a new one (the most surprising claim, number or question), never its original first line.")
 
 def log_audience(cfg, log):
     src = "this job" if cfg.get("_audience_from") == "job" else "settings default"

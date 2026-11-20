@@ -93,6 +93,13 @@ def _backup(j, log):
         log(f"Main channel save not queued ({type(e).__name__}: {str(e)[:120]})")
 
 
+def _owner_channel(j, cfg):
+    try: m = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError): return False
+    owner = str(cfg.get("owner_name") or "Tariq Hasnain").casefold()
+    return any(owner == str(m.get(k) or "").strip().casefold() for k in ("channel", "uploader"))
+
+
 def _mark_own(j, log):
     """The owner's own YouTube video: its meta says own_footage (no "Based on" credit, source footage from the first second)."""
     f = j.dir / "src" / "meta.json"
@@ -598,6 +605,8 @@ class Studio:
             dbg.manual(st)
             j.save(prog={"out": output_of(st), "stage": st, "n": 0, "of": 0})
             j.save(stage=st); log(f"== {st} ==")
+            if not cfg.get("own_source") and _owner_channel(j, cfg):   # a source from the owner's own channel is his video
+                cfg["own_source"] = True; j.save(own_source=True); log("  the source is from your own channel: treated as your own video")
             if cfg.get("own_source"): _mark_own(j, log)
             if st == "transcript":
                 man = j.dir / "src" / "transcript_manual.txt"
