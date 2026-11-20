@@ -190,7 +190,13 @@ def audience_key(cfg):
 def audience_line(cfg):
     """The prompt line for this job's audience (cfg["audience"]: the job's choice, else settings.json, else informed)."""
     from . import style
-    return AUDIENCE[audience_key(cfg)] + style.text(cfg)   # + the house style learned from feedback ('' when none)
+    return AUDIENCE[audience_key(cfg)] + style.text(cfg) + (OWN_SOURCE if cfg.get("own_source") else "")   # + house style (+ own video)
+
+
+# owner, 2026-11-20: "this entire video is my own. we just need to augment it with more research and jokes"
+OWN_SOURCE = ("\nTHIS IS THE CHANNEL OWNER'S OWN VIDEO: write in the channel's own voice, as first-hand material. Never attribute "
+              "it (no \"X says\", \"X's breakdown\", \"according to the video\"), never name its creator, never call it a source, "
+              "episode or interview. Keep its points and numbers, and deepen them with research, context and jokes.")
 
 def log_audience(cfg, log):
     src = "this job" if cfg.get("_audience_from") == "job" else "settings default"

@@ -120,6 +120,7 @@ def create():
                             b.get("visual_review") or config.load().get("visual_review_default", "never"), dbg_on=dbg_on, bps=bps, own_clips=own,
                             tts_engine=b.get("tts_engine", ""), audience=str(b.get("audience") or "").lower(),
                             length_flex=str(b.get("length_flex", "1")).lower() not in ("0", "false", "off", "no"),
+                            own_source=str(b.get("own_source", "")).lower() in ("1", "true", "on", "yes"),
                             newsroom=str(b.get("newsroom", "")).lower() in ("1", "true", "yes", "on"))   # Newsroom jobs queue ahead of hand jobs
     except ValueError as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(id=jid)

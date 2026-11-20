@@ -17,7 +17,7 @@ def chunks(text, limit=85):
 def do_charts(job, plan, cfg, log):
     d = job / "charts"; d.mkdir(exist_ok=True)
     meta = json.loads((job / "src" / "meta.json").read_text(encoding="utf-8")) if (job / "src" / "meta.json").exists() else {}
-    credit = f"Based on \"{meta.get('title', '')}\" — {meta.get('channel') or meta.get('uploader') or ''}".strip(" —")
+    credit = "" if meta.get("own_footage") else f"Based on \"{meta.get('title', '')}\" — {meta.get('channel') or meta.get('uploader') or ''}".strip(" —")
     charts.render({"kind": "title", "title": plan["title"], "subtitle": plan.get("subtitle", ""), "credit": credit}, d / "_title.png")
     # owner, 2026-11-18: the end card never says where the video came from (the description credits the source)
     charts.render({"kind": "end", "text": plan.get("end_text") or "Thanks for watching", "credit": ""}, d / "_end.png")
