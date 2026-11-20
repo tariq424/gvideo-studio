@@ -162,7 +162,7 @@ def _draft(cfg, job, kind, channel, title, length, job_dir=None, published=()):
     if not d.get("thumbnail"):
         at = 2.5 if kind == "short" else (_face_frame(job_dir) if job_dir else None) or max(1.0, min(60.0, length * 0.1))
         d["thumbnail"] = _http(cfg, "/api/thumbnail", form=dict(job=job, channel=channel, kind=kind, seconds=f"{at:.2f}"))["thumbnail"]
-    d.update(visibility="Private", channel=channel)   # always a private save
+    d.update(visibility=str(cfg.get("youtube_main_visibility") or "Unlisted"), channel=channel)   # owner, 2026-11-20: Unlisted (was Private), so end screens and Related links work
     return d
 
 
@@ -212,7 +212,7 @@ def process(cfg, job_dir, log=None):
         busy = "in progress" in msg or "shared Chrome profile" in msg
         say(("publisher busy" if busy else f"not saved ({msg})") + f"; retrying in {RETRY // 60} min")
         return False
-    say(f"saving Private to {channel}: " + ", ".join(sorted(k.replace('_task', '') for k in ids)))
+    say(f"saving {cfg.get('youtube_main_visibility') or 'Unlisted'} to {channel}: " + ", ".join(sorted(k.replace('_task', '') for k in ids)))
     last = ids.get("short_task") or ids.get("long_task")
     deadline = time.time() + 3 * 3600
     while time.time() < deadline:

@@ -47,7 +47,7 @@ def test_a_finished_job_goes_up_private_as_a_linked_pair(tmp_path, pub):
     pair = [c for c in calls if c[0] == "/publish/pair"]
     assert len(pair) == 1
     body = pair[0][1]
-    assert body["long"]["visibility"] == body["short"]["visibility"] == "Private"   # always a private save
+    assert body["long"]["visibility"] == body["short"]["visibility"] == "Unlisted"   # owner, 2026-11-20: Unlisted (was Private)
     assert body["long"]["channel"] == body["short"]["channel"] == "tariqhasnain"
     assert body["long"]["title"] == "Mr. Clinton Shows Bermuda"                       # the job's title, not the file name
     assert body["short"]["title"].endswith("#shorts")
