@@ -42,7 +42,13 @@ Done after the reboot (2026-11-19 evening):
   CORRECTION (evening): those 600-frame slices were start-up bound. On the real 68.5-min render: 2 workers ~320 frames/min,
   4 -> ~360, 8 -> ~310, with CPU at ~35%, GPU 7%, disk 28% every time. The worker count is NOT the bottleneck; something
   serial is (suspect: Chrome's single GPU process capturing frames with --gl=angle; unverified). Next: a ~300-frame
-  --log=verbose render to see per-frame timings, then try --gl=swangle / other capture settings. Default stays 4. Free RAM under 6 GB
+  --log=verbose render to see per-frame timings, then try --gl=swangle / other capture settings. Default stays 4.
+  DIAGNOSED (20:30): 300-frame slices from a pre-built bundle, 4 workers: angle 350/min, swangle 240, 8 compositor threads 337,
+  jpeg 80 338, swangle x8 237. Per frame per tab ~0.7 s, of which ~0.27 s waits (frame set 170 ms, video fetch 85 ms) and
+  ~0.43 s inside Chrome. One render = one Chrome browser = serial. Separate renders scale: robotics render (~300/min)
+  kept its speed while 2 more renders ran beside it at 480/min combined (~780/min total). FIX: chunked parallel render
+  (2-3 remotion processes on frame ranges, audio rendered once, ffmpeg concat + mux; finished chunks survive a resume).
+  Also: every render spends ~3 min bundling + ~3 min copying the public dir (1.4 GB) before frame 1. Free RAM under 6 GB
   logs LOW RESOURCES and sets the job's resource_warning (shown on the job page); only under 3 GB does it drop to 2 workers.
 - Length policy DONE: Auto = ~15 min (auto_target_min); a set length (slider 3-120 or any number) is a minimum; either goes
   longer ONLY when the outline names essential information that would be dropped (over_reason, logged); per-job checkbox
