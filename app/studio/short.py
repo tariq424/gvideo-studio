@@ -334,8 +334,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
         punch_up(cfg, plan, log, force=smoke, budget=None if smoke else int(total * 1.05))   # smoke: every beat gets its joke here; otherwise only beats still without one; extra asides only while the budget allows
         if not smoke:
-            from .writer import fresh_hook
+            from .writer import fresh_hook, ensure_hook
             plan = fresh_hook(llm, plan, log)   # owner, 2026-11-19: the opening line must not repeat a later one
+            plan = ensure_hook(llm, plan, log, cfg)   # owner, 2026-11-20: detect a hook; add one when there is none
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0

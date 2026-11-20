@@ -459,6 +459,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         punch_up_long(cfg, plan, log, stop)
         plan = normalize(plan)
         plan = fresh_hook(llm, plan, log)   # owner, 2026-11-19: the opening line must not repeat a later one
+        plan = ensure_hook(llm, plan, log, cfg)   # owner, 2026-11-20: detect a hook; add one when there is none
         w = sum(_nw(s["vo"]) for s in plan["sections"])
         tk = f" Tokens in/out: {llm.tokens_in}/{llm.tokens_out}" if llm.tokens_in else ""
         log(f"Script ready: {len(plan['sections'])} sections, {w} words (~{w / cfg['wpm']:.1f} min), "
@@ -1103,6 +1104,53 @@ def hook_repeat(plan):
     best = max(later, key=lambda x: len(hw & _content(x)) / len(hw), default=None)
     if best and len(hw & _content(best)) / len(hw) >= HOOK_SAME: return hook, best
     return None
+
+
+HOOK_CHECK = """The first sentence of a video:
+"{first}"
+Video title: "{title}"
+Is that first sentence a HOOK - a surprising claim, a striking number, a sharp question or high stakes that makes a viewer need
+to keep watching? It is NOT a hook if it is a credit or attribution ("X says", "X ran the numbers", a person's name first), a recap,
+a greeting, an introduction of the host or channel, or plain framing ("Today we look at ...").
+If it is not, write ONE hook sentence of 8-25 words to go before it, using only facts from the narration below (no number or
+claim that is not in it), and never naming {owner}. Say whether the original first sentence should then be dropped (only when it is
+a credit, a greeting, or names {owner}).
+Narration (facts only):
+{body}
+Reply with JSON: {{"is_hook": true|false, "why": "a few words", "hook": "... or empty", "drop_first": true|false}}"""
+
+
+def ensure_hook(llm, plan, log, cfg=None):
+    """owner, 2026-11-20: "detect a hook and add if not present". The opening sentence is judged; when it is not a hook (a
+    credit, recap, greeting or framing), a hook made from the narration's own facts goes in front of it, and a credit /
+    greeting / owner's-name first line is dropped."""
+    secs = plan.get("sections") or []
+    if not secs: return plan
+    ss = _sentences(secs[0].get("vo") or "")
+    if not ss: return plan
+    owner = str((cfg or {}).get("owner_name") or "Tariq Hasnain")
+    body = " ".join(x.get("vo") or "" for x in secs)[:12000]
+    def chk(j):
+        if not isinstance(j.get("is_hook"), bool): raise ValueError("is_hook must be true or false")
+        if j["is_hook"]: return
+        h = str(j.get("hook") or "").strip()
+        if not 6 <= _nw(h) <= 30: raise ValueError("the hook must be 8-25 words")
+        if owner.casefold() in h.casefold(): raise ValueError(f"the hook must not name {owner}")
+        bad = _nums(h) - _nums(body)
+        if bad: raise ValueError(f"numbers not in the narration: {sorted(bad)}")
+    try:
+        j = llm.trace("hook check").chat_json("You judge and write cold-open hooks for videos. Reply with JSON only.",
+            HOOK_CHECK.format(first=ss[0].replace('"', "'"), title=str(plan.get("title") or "").replace('"', "'"), owner=owner,
+                              body=body.replace('"', "'")), max_tokens=250, check=chk)
+    except Exception as e:
+        log(f"  hook check skipped ({str(e)[:120]})"); return plan
+    if j.get("is_hook"):
+        log(f"  hook check: the opening is a hook ({str(j.get('why') or '')[:60]})"); return plan
+    new = str(j.get("hook") or "").strip()
+    rest = ss[1:] if j.get("drop_first") or owner.casefold() in ss[0].casefold() else ss
+    secs[0]["vo"] = new + " " + " ".join(rest)
+    log(f'  hook added ({str(j.get("why") or "no hook")[:60]}): {new}' + ("; the credit line was dropped" if rest is not ss else ""))
+    return plan
 
 
 def fresh_hook(llm, plan, log, tries=3):
