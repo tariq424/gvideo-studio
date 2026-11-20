@@ -93,7 +93,7 @@ def create():
     if b.get("mode") == "smoke" and not b.get("url") and not b.get("transcript") and not (f and f.filename):   # no source: the standard smoke video
         from studio import config as _cfg; b["url"] = _cfg.load().get("smoke_source", "")
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
-    try: mins, ssec = float(b.get("minutes", 0) or 0), float(b.get("short_secs", 165) or 165)
+    try: mins, ssec = float(b.get("minutes", 0) or 0), float(b.get("short_secs", 175) or 175)
     except (TypeError, ValueError): return jsonify(error="Video lengths must be numbers."), 400
     # 0 = auto (~15 min, longer only when essential); a set length is a minimum of 3 minutes or more, no cap (owner, 2026-11-19)
     if mins and mins < 3: return jsonify(error="Long video length must be Auto, or at least 3 minutes."), 400

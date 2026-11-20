@@ -38,8 +38,9 @@ between beats, so that time is already taken. Explain terms briefly rather than 
 COMPLETENESS COMES FIRST (owner): keep every vital detail - who, what, the numbers that matter, the consequences. The length is
 a guide, not a cap: going over it, even past 3:00, is fine (YouTube then lists it as a normal video, and that is OK). Never drop
 or squeeze a vital point to fit. If the notes run out sooner, stop sooner; never pad.
-- Beat 1 is the hook: one short line framing what this is (who is talking, about what), then the most surprising claim or number,
-  in plain words (no jargon in the first sentence). No greetings, no "in this video".
+- Beat 1 is the hook. Its FIRST sentence is the single most surprising claim, number, stake or question, said plainly - never who is
+  talking, never a credit ("X says", "X ran the numbers"), never a recap. Only then one short line of framing (who, about what).
+  No jargon in the first sentence. No greetings, no "in this video".
 - One conflict or surprise is the through-line (who is right, what went wrong, what nobody expected): every beat moves it forward,
   so a viewer at any second wants the next one. Background, bios and study parameters only when the story needs them, but
   never leave out a vital detail for pace.
@@ -1032,6 +1033,9 @@ def _do_voice_inner(job, plan, cfg, wg, log, stop):
         tf.write_text(json.dumps(t, indent=1), encoding="utf-8")
     total = sum(v["dur"] + GAP for v in t.values()) + TAIL
     log(f"Short narration: {total:.0f}s in total")
+    try:   # owner, 2026-11-20: a 2:45 Short came out 2:31 - the voice read faster than its table pace; learn the real pace
+        tts.learn_pace(cfg, sum(len(v["words"]) for v in t.values()), sum(v["dur"] for v in t.values()), log)
+    except Exception: pass
 
 # ---------------------------------------------------------------- build + render
 def _norm(w): return re.sub(r"[^a-z0-9]", "", str(w).lower())

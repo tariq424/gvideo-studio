@@ -91,8 +91,34 @@ def try_kokoro(cfg, items, log, tag, stop):
         return False
 
 
+def _pace_key(cfg):
+    return engine(cfg) + ("/" + (cfg.get("kokoro_voice") or DEFAULT_VOICE) if engine(cfg) == "kokoro" else "")
+
+
+def _pace_file(cfg):
+    return Path(cfg.get("jobs_dir") or ".").parent / "voice_pace.json"
+
+
+def learn_pace(cfg, words, secs, log=print):
+    """Record the pace a voice really read at (words of narration / seconds spoken), averaged over jobs."""
+    if words < 80 or secs < 20: return
+    f = _pace_file(cfg); key = _pace_key(cfg)
+    try: d = json.loads(f.read_text(encoding="utf-8"))
+    except Exception: d = {}
+    now = words / secs * 60; old = d.get(key, {}).get("wpm")
+    new = round(now if not old else 0.6 * old + 0.4 * now, 1)
+    d[key] = {"wpm": new, "n": d.get(key, {}).get("n", 0) + 1}
+    f.write_text(json.dumps(d, indent=1), encoding="utf-8")
+    log(f"  voice pace: {key} read at {now:.0f} wpm; next Shorts are sized at {new:.0f} wpm")
+
+
 def wpm(cfg):
-    """Speaking pace used to size a Short's script: the cloned narrator's measured voice_wpm, or kokoro_wpm for Kokoro."""
+    """Speaking pace used to size a Short's script: the pace this voice was measured at in earlier jobs (learn_pace), else the
+    cloned narrator's voice_wpm, or kokoro_wpm x the voice's table pace for Kokoro."""
+    try:
+        got = json.loads(_pace_file(cfg).read_text(encoding="utf-8")).get(_pace_key(cfg), {}).get("wpm")
+        if got: return float(got)
+    except Exception: pass
     if engine(cfg) in CLONED: return float(cfg.get(engine(cfg) + "_wpm") or CLONED[engine(cfg)]["wpm"])
     if engine(cfg) != "kokoro": return float(cfg.get("voice_wpm", 155))
     pace = VOICE_MENU.get(cfg.get("kokoro_voice") or DEFAULT_VOICE, {}).get("pace", 1.0)   # a faster voice fits more words

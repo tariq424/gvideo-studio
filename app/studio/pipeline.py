@@ -255,7 +255,7 @@ class Studio:
                 pass
 
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
-               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None,
+               mode="both", short_secs=175, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None,
                own_clips=None, tts_engine="", audience="", newsroom=False, length_flex=True):
         smoke = mode == "smoke"   # pipeline check: a ~30-second Short (about 75 words); real Shorts keep the 2:00 minimum
         if smoke: mode, short_secs = "short", SMOKE_SECS
