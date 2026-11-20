@@ -38,7 +38,11 @@ Done after the reboot (2026-11-19 evening):
 - Render workers. Benchmark, 600 frames of job 20261119_061158, frame cache capped at 2 GB:
   2 workers 90 frames/min (+4.7 GB) | 4 workers 178 (+5.4 GB) | 6 workers 120 (+4.8 GB) | 8 workers 133 (+6.2 GB);
   4 workers with a 4 GB cache: 126. Earlier, uncapped, 2 workers: 119 frames/min and +8.5 GB.
-  New rule (`short.render_concurrency` / `render_flags`): 4 workers and a 2 GB cache on every render. Free RAM under 6 GB
+  New rule (`short.render_concurrency` / `render_flags`): 4 workers and a 2 GB cache on every render.
+  CORRECTION (evening): those 600-frame slices were start-up bound. On the real 68.5-min render: 2 workers ~320 frames/min,
+  4 -> ~360, 8 -> ~310, with CPU at ~35%, GPU 7%, disk 28% every time. The worker count is NOT the bottleneck; something
+  serial is (suspect: Chrome's single GPU process capturing frames with --gl=angle; unverified). Next: a ~300-frame
+  --log=verbose render to see per-frame timings, then try --gl=swangle / other capture settings. Default stays 4. Free RAM under 6 GB
   logs LOW RESOURCES and sets the job's resource_warning (shown on the job page); only under 3 GB does it drop to 2 workers.
 - Length policy DONE: Auto = ~15 min (auto_target_min); a set length (slider 3-120 or any number) is a minimum; either goes
   longer ONLY when the outline names essential information that would be dropped (over_reason, logged); per-job checkbox
