@@ -8,7 +8,7 @@ from .llm import LLM, parse_json
 from .writer import SYSTEM, make_notes, fact_check, audience_line, audience_key, log_audience, jargon_check, editorial_review, COVER_FLOOR
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 179.0   # YouTube Shorts allow up to 180 s (the hard maximum; a second of margin)
-MAX_SPEED = 1.12                          # the most a Short's narration is ever sped up to fit 3:00
+MAX_SPEED = 1.05                          # the most a Short's narration is ever sped up to fit 3:00 (1.12 sounded hurried, 2026-11-20)
 
 
 def fit3(cfg, mode):
@@ -40,6 +40,7 @@ a guide, not a cap: going over it, even past 3:00, is fine (YouTube then lists i
 or squeeze a vital point to fit. If the notes run out sooner, stop sooner; never pad.
 - Beat 1 is the hook. Its FIRST sentence is the single most surprising claim, number, stake or question, said plainly - never who is
   talking, never a credit ("X says", "X ran the numbers"), never a recap. Only then one short line of framing (who, about what).
+  Never say the name of this channel or its owner (Tariq Hasnain) anywhere in the narration: the video is his.
   No jargon in the first sentence. No greetings, no "in this video".
 - One conflict or surprise is the through-line (who is right, what went wrong, what nobody expected): every beat moves it forward,
   so a viewer at any second wants the next one. Background, bios and study parameters only when the story needs them, but

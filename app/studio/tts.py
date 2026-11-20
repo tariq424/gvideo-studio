@@ -32,8 +32,8 @@ DEFAULT_VOICE = "am_michael"
 # Short's length budget (kokoro_wpm x pace) stays right whichever voice reads it.
 VOICE_MENU = {
     "am_michael": {"sound": "steady, authoritative male", "for": "politics, world news, diplomacy, current affairs", "pace": 1.00},
-    "am_fenrir": {"sound": "deep, grave male", "for": "war, conflict, disasters, crime, investigations", "pace": 1.334},
-    "am_puck": {"sound": "lively, playful male", "for": "comedy, satire, pop culture, sports, entertainment", "pace": 1.381},
+    "am_fenrir": {"sound": "deep, grave male", "for": "war, conflict, disasters, crime, investigations", "pace": 1.334, "speed": 0.85},
+    "am_puck": {"sound": "lively, playful male", "for": "comedy, satire, pop culture, sports, entertainment", "pace": 1.381, "speed": 0.82},
     "af_heart": {"sound": "warm, rich female", "for": "science, technology, AI, the future, health, human interest, education, nature", "pace": 1.073},
     "af_bella": {"sound": "bright, light female (thin low end)", "for": "lifestyle, travel, upbeat consumer topics", "pace": 1.072},
     "af_sarah": {"sound": "calm, measured female", "for": "finance, economy, history, explainers", "pace": 1.095},
@@ -91,6 +91,12 @@ def try_kokoro(cfg, items, log, tag, stop):
         return False
 
 
+def voice_speed(voice):
+    """owner, 2026-11-20 ("the narrator speaks in a very hurried voice"): am_puck read at ~193 wpm and am_fenrir ~187 against ~155
+    for a calm narrator; those two are slowed to a normal narration pace."""
+    return float(VOICE_MENU.get(voice, {}).get("speed", 1.0))
+
+
 def _pace_key(cfg):
     return engine(cfg) + ("/" + (cfg.get("kokoro_voice") or DEFAULT_VOICE) if engine(cfg) == "kokoro" else "")
 
@@ -121,7 +127,8 @@ def wpm(cfg):
     except Exception: pass
     if engine(cfg) in CLONED: return float(cfg.get(engine(cfg) + "_wpm") or CLONED[engine(cfg)]["wpm"])
     if engine(cfg) != "kokoro": return float(cfg.get("voice_wpm", 155))
-    pace = VOICE_MENU.get(cfg.get("kokoro_voice") or DEFAULT_VOICE, {}).get("pace", 1.0)   # a faster voice fits more words
+    v = VOICE_MENU.get(cfg.get("kokoro_voice") or DEFAULT_VOICE, {})
+    pace = v.get("pace", 1.0) * v.get("speed", 1.0)   # a faster voice fits more words (fast voices are slowed: voice_speed)
     return float(cfg.get("kokoro_wpm", 140)) * pace
 
 
@@ -155,7 +162,7 @@ def kokoro_batch(cfg, items, log, tag="voice", stop=lambda: False):
     if why: raise RuntimeError(f"tts_engine is kokoro but {why}")
     if stop(): raise RuntimeError("cancelled")
     voice = cfg.get("kokoro_voice") or DEFAULT_VOICE
-    req = {"voice": voice, "lang": lang_of(voice), "speed": float(cfg.get("kokoro_speed", 1.0) or 1.0),
+    req = {"voice": voice, "lang": lang_of(voice), "speed": float(cfg.get("kokoro_speed", 1.0) or 1.0) * voice_speed(voice),
            "device": cfg.get("kokoro_device", ""), "items": [{"text": t, "out": str(o.with_suffix(".k24.wav"))} for t, o in todo]}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(req, f); jf = f.name

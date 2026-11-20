@@ -20,7 +20,7 @@ def fake_llm(answer):
 def test_pace_follows_the_voice():
     cfg = {"tts_engine": "kokoro", "kokoro_wpm": 140}
     assert tts.wpm(dict(cfg, kokoro_voice="am_michael")) == 140
-    assert round(tts.wpm(dict(cfg, kokoro_voice="am_fenrir"))) == 187   # a faster reader fits more words in the same seconds
+    assert round(tts.wpm(dict(cfg, kokoro_voice="am_fenrir"))) == 159   # fenrir is slowed to a normal narration pace (2026-11-20)
     assert tts.wpm(dict(cfg, kokoro_voice="unknown_voice")) == 140
 
 
