@@ -32,12 +32,6 @@ input[type=text],select{width:100%;background:var(--inset);color:var(--fg);borde
 <div class="card"><h2>What is said here</h2><div id="words" class="words" data-testid="beat-stt"></div>
  <h2 style="margin-top:12px">How the picture was made</h2><div class="kv" id="prompts" data-testid="beat-prompts"></div><div id="lad" class="lad"></div></div>
 
-<div class="card"><div class="player"><video id="pv" playsinline preload="auto" data-testid="beat-player"></video><span id="badge" class="badge">In the video now</span></div>
- <input type="range" id="scrub" min="0" max="1" step="0.01" value="0" oninput="seek(+this.value)" aria-label="Scrub within this beat">
- <div class="row"><button class="sec" id="playb" onclick="togglePlay()">Play beat</button><span class="tm mut" id="tm">0:00.0</span><span style="flex:1"></span>
-  <span id="pvacts" hidden><button class="sec" data-testid="beat-discard" onclick="discard()">Discard</button> <button data-testid="beat-splice" onclick="splice()">Splice into the video</button></span></div>
- <div id="msg" class="mut" data-testid="beat-msg"></div></div>
-
 <div class="card"><h2>Make a new picture for this beat</h2>
  <label for="rung">Rung</label><div class="row"><select id="rung" style="flex:1" onchange="rungUi()" data-testid="beat-rung"></select>
   <button id="rungb" onclick="runRung()" data-testid="beat-render-rung">Render this rung</button></div>
@@ -47,6 +41,12 @@ input[type=text],select{width:100%;background:var(--inset);color:var(--fg);borde
    <select id="tag" style="width:auto"><option value="">label: auto</option><option>FILE</option><option>YOUR FOOTAGE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select>
    <button class="sec" onclick="addOwn($('link').value.trim())">Add</button></div>
   <div class="mut" style="font-size:13px;margin-top:6px">A still you add can then be rendered with camera shots (overhead, dolly, pan, zoom) from its card below.</div></div></div>
+
+<div class="card"><div class="player"><video id="pv" playsinline preload="auto" data-testid="beat-player"></video><span id="badge" class="badge">In the video now</span></div>
+ <input type="range" id="scrub" min="0" max="1" step="0.01" value="0" oninput="seek(+this.value)" aria-label="Scrub within this beat">
+ <div class="row"><button class="sec" id="playb" onclick="togglePlay()">Play beat</button><span class="tm mut" id="tm">0:00.0</span><span style="flex:1"></span>
+  <span id="pvacts" hidden><button class="sec" data-testid="beat-discard" onclick="discard()">Discard</button> <button data-testid="beat-splice" onclick="splice()">Splice into the video</button></span></div>
+ <div id="msg" class="mut" data-testid="beat-msg"></div></div>
 
 <div class="card"><h2>Options for this beat</h2><div class="mut" style="font-size:13px;margin-bottom:8px">Tick the ones to show (they play in the order ticked), then preview. Blue outline = in the video now. On a still: pick camera shots and render them.</div>
  <div id="cands" class="grid" data-testid="beat-cands"></div>
@@ -87,7 +87,9 @@ function drawInfo(){const b=I.beat;$('ttl').textContent=`Beat editor · ${b.labe
   :`${esc(b.vo||'(no narration in this beat)')}<div class="mut" style="font-size:12px;margin-top:4px">Narration of this beat (no word timings stored).</div>`;
  const P=I.prompts||{};$('prompts').innerHTML=[['AI image prompt',P.still_prompt],['Animation prompt',P.motion],['Stock searches',(P.queries||[]).join(' · ')],['Subject',P.subject],['Picture source',b.source],['Made by',(b.rungs||[]).join(' · ')]]
   .map(([k,v])=>`<b>${k}</b><span>${v?esc(v):'<span class="mut">—</span>'}</span>`).join('');
- $('lad').innerHTML=(b.ladder||[]).map(sl=>`<div>Picture ${esc(String(sl.slot||'').replace(/^#/,''))}: ${(sl.failed||[]).map(([r,w])=>`<span class="f">✗ ${r?esc(r)+': ':''}${esc(w)}</span>`).join(' → ')}${(sl.failed||[]).length?' → ':''}${sl.used?`<span class="ok">✓ ${esc(sl.used)}</span>`:'<b>nothing fired</b>'}${!(sl.failed||[]).length&&sl.used?' <span class="mut">— nothing failed: the first rung tried was used</span>':''}</div>`).join('');
+ const L=b.ladder||[],clean=L.length&&L.every(sl=>!(sl.failed||[]).length&&sl.used);
+ if(clean){$('lad').innerHTML=L.map(sl=>`<div><span class="ok">✓ Used: ${esc(sl.used)}</span>${/SOURCE|your footage|YOUR FOOTAGE/i.test(sl.used)?' <span class="mut">— your own footage, as filmed</span>':''}</div>`).join('')}
+ else $('lad').innerHTML=L.map(sl=>`<div>Picture ${esc(String(sl.slot||'').replace(/^#/,''))}: ${(sl.failed||[]).map(([r,w])=>`<span class="f">✗ ${r?esc(r)+': ':''}${esc(w)}</span>`).join(' → ')}${(sl.failed||[]).length?' → ':''}${sl.used?`<span class="ok">✓ ${esc(sl.used)}</span>`:'<b>nothing fired</b>'}</div>`).join('');
  $('rung').innerHTML=I.rungs.map(r=>`<option value="${r.id}">${esc(r.name)}${r.heavy?' — renders on this PC':''}</option>`).join('');rungUi()}
 function rungUi(){const own=$('rung').value=='own';$('own').hidden=!own;$('rungb').hidden=own}
 

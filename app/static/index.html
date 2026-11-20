@@ -507,10 +507,10 @@ function stList(bt){const ss=bt.stretches||[];if(!ss.length)return'';
 // the visual ladder of the beat under the playhead: per picture slot, each rung that failed and why, then the one that fired
 // owner, 2026-11-18: above the scrubber, one line per picture - every rung that failed (and why), then the one that fired
 function ladHtml(b){if(!b)return`<div class="mut">Scrub to a beat to see its visual ladder.</div>`;const L=b.ladder||[];
- let h=`<div class="lad-h" style="display:flex;gap:8px;align-items:center"><span style="flex:1">${esc(b.label)} · visual ladder (failed → fired)</span>${b.editable?`<button class="sec" style="padding:3px 10px;font-size:12px" data-testid="ladder-edit-beat" onclick="openBeat('${b.id}')" title="Open this beat in its own window: re-make its picture with any rung or your own file, preview, then Splice or Discard">Edit beat ↗</button>`:''}</div>`;if(!L.length)return h+`<div class="mut">No ladder record for this beat (your footage, or made before records were kept).</div>`;
+ let h=`<div class="lad-h" style="display:flex;gap:8px;align-items:center"><span style="flex:1">${esc(b.label)} · ${L.length&&L.every(sl=>!(sl.failed||[]).length&&sl.used)?'picture':'visual ladder (failed → fired)'}</span>${b.editable?`<button class="sec" style="padding:3px 10px;font-size:12px" data-testid="ladder-edit-beat" onclick="openBeat('${b.id}')" title="Open this beat in its own window: re-make its picture with any rung or your own file, preview, then Splice or Discard">Edit beat ↗</button>`:''}</div>`;if(!L.length)return h+`<div class="mut">No ladder record for this beat (your footage, or made before records were kept).</div>`;
  const ar=`<span class="lad-ar">→</span>`;
  for(const sl of L){const parts=(sl.failed||[]).map(([r,why])=>`<span class="lad-f">✗ Failed: ${r?esc(r)+': ':''}${esc(why)}</span>`);
-  parts.push(sl.used?`<span class="lad-ok">✓ Fired: ${esc(sl.used)}</span>`:`<span class="lad-f"><b>Nothing fired</b></span>`);
+  parts.push(sl.used?`<span class="lad-ok">✓ ${(sl.failed||[]).length?'Fired':'Used'}: ${esc(sl.used)}${!(sl.failed||[]).length&&/SOURCE|YOUR FOOTAGE/i.test(sl.used)?' — your own footage, as filmed':''}</span>`:`<span class="lad-f"><b>Nothing fired</b></span>`);
   h+=`<div class="lad-slot"><span class="lad-n">Picture ${esc(String(sl.slot).replace(/^#/,''))}:</span>${parts.join(ar)}</div>`}
  return h}
 function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
