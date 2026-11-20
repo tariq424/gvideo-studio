@@ -201,6 +201,63 @@ def review_beat(jid, bid):
     except Exception as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(_rv_payload(jid))
 
+# ---- beat editor window (owner, 2026-11-19): one beat, its narration and prompts, a rung or your own file, Discard or Splice
+@app.get("/beat/<jid>/<bid>")
+def beat_page(jid, bid):
+    return send_from_directory(app.static_folder, "beat.html")
+
+@app.get("/api/jobs/<jid>/beat/<bid>")
+def beat_info(jid, bid):
+    from studio import beat_editor
+    try: return jsonify(beat_editor.info(studio, jid, bid, request.args.get("kind")))
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+
+@app.post("/api/jobs/<jid>/beat/<bid>/<action>")
+def beat_act(jid, bid, action):
+    from studio import beat_editor, review, edit, gpu_lock
+    b = request.get_json(silent=True) or {}; j = studio.job(jid); cfg = config.load(); ws = _ws(jid)
+    heavy = action in ("preview", "splice", "shots") or (action == "rung" and b.get("rung") in beat_editor.HEAVY)
+    busy = beat_editor.pipeline_busy(studio, jid) if heavy else ""
+    if busy: return jsonify(error=busy, busy=True), 409   # never slow down or interrupt a video being made
+    try:
+        if action == "open":
+            return jsonify(edit.open_beat(j.dir, bid, cfg, j.log))
+        if action == "rung":
+            r = b.get("rung")
+            if r == "headline":
+                rv = review.load(ws); cid = next((c for c in rv["beats"][bid]["cands"] if rv["cands"][c]["rung"] == "headline"), None)
+                if not cid: return jsonify(error="no headline card for this beat"), 400
+                review.decide(ws, bid, "choose", [cid], cfg, j.log)
+            elif r == "own":
+                review.supply(ws, bid, b.get("src", ""), b.get("tag", ""), cfg, j.log); j.log(f"Beat editor {bid}: your file added")
+            elif r in {x for x, _, _ in beat_editor.RUNGS}:
+                err = review.start(studio, jid, bid, {"stock": "more_stock", "all": "expand"}.get(r, r), {"tag": b.get("tag", "")}, ws=ws)
+                if err: return jsonify(error=err), 409
+                j.log(f"Beat editor {bid}: rendering rung {r}")
+            else: return jsonify(error="unknown rung"), 400
+            return jsonify(review.load(ws))
+        if action == "shots":
+            err = review.start(studio, jid, bid, "shots", {"cid": b.get("cid"), "move": b.get("move", "auto")}, ws=ws)
+            if err: return jsonify(error=err), 409
+            return jsonify(review.load(ws))
+        if action == "preview":
+            with gpu_lock.holder(desc=f"beat-editor-preview:{jid}:{bid}"):
+                return jsonify(edit.preview(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log))
+        if action == "discard":
+            p = (j.dir / str(b.get("video", ""))).resolve()
+            if j.dir.resolve() in p.parents and p.parent.name == "previews": p.unlink(missing_ok=True)
+            return jsonify(ok=True)
+        if action == "splice":
+            ok, holder = _editor_owner(jid, b.get("sid", ""))
+            if not ok: return jsonify(error=holder, busy=True), 409
+            err = edit.start_apply(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log)
+            if err: return jsonify(error=err), 409
+            j.log(f"Beat editor {bid}: splicing the new picture into the video (only this beat is re-cut)")
+            return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(error=str(e)[:300]), 400
+    return jsonify(error="unknown action"), 400
+
 @app.post("/api/jobs/<jid>/review_all/<action>")
 def review_all(jid, action):
     from studio import review

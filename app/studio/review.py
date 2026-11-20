@@ -484,15 +484,17 @@ def start(studio, jid, bid, kind, payload=None, ws=None):
     if not _gpu.acquire(blocking=False): return "Already working on a beat; wait for it to finish."
     job = ws or studio.job(jid).dir
     _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)...", "more_stock": "Searching more stock footage...",
-                     "storyboard": "Storyboarding this beat..."}.get(kind, "Working on your instruction..."))
+                     "storyboard": "Storyboarding this beat...", "photo": "Searching real photos...", "imagegen": "Asking the image services...",
+                     "wangp": "WanGP is making a still...", "shots": "Rendering camera shots..."}.get(kind, "Working on your instruction..."))
     def run():
         log = studio.job(jid).log
         try:
             from . import config
             from .wangp import WanGP
             cfg = config.load(); wg = WanGP(cfg)
+            from . import beat_editor   # the beat editor's single rungs and camera shots (owner, 2026-11-19)
             {"expand": expand, "refine": refine, "animate": add_animation, "more_stock": more_stock,
-             "storyboard": storyboard_beat}[kind](job, bid, cfg, wg, log, payload or {})
+             "storyboard": storyboard_beat, **beat_editor.ACTIONS}[kind](job, bid, cfg, wg, log, payload or {})
         except Exception as e:
             log(f"  {bid}: {kind} failed: {str(e)[:300]}")
             with _lock(job):

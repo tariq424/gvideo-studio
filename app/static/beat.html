@@ -1,0 +1,134 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Beat editor</title>
+<style>
+:root{--bg:#f3f0e9;--panel:#fff;--line:#ccd3da;--fg:#1d2733;--mut:#5d6b7a;--acc:#e8930c;--ok:#1a9e6b;--bad:#d93a3a;--blue:#2f7fe0;--inset:#f8f5ef}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,Segoe UI,sans-serif;padding:16px}
+h1{font-size:19px;margin:0}h2{font-size:15px;margin:0 0 8px}.mut{color:var(--mut)}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 4px}button{background:var(--acc);color:#111;border:0;border-radius:8px;padding:8px 13px;font-weight:600;cursor:pointer;font:inherit;font-weight:600}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:default}
+input[type=text],select{width:100%;background:var(--inset);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.wrap{max-width:1180px;margin:0 auto}
+.player{position:relative;background:#000;border-radius:10px;overflow:hidden}.player video{display:block;width:100%;max-height:62vh;background:#000}
+.badge{position:absolute;top:10px;left:10px;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;background:rgba(0,0,0,.6);color:#fff}
+.badge.pv{background:var(--acc);color:#111}
+#scrub{width:100%;margin:8px 0 0}.tm{font-variant-numeric:tabular-nums}
+.words span{cursor:pointer;border-radius:4px;padding:0 1px}.words span:hover{background:rgba(232,147,12,.25)}.words span.now{background:var(--acc);color:#111}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:14px}.kv b{color:var(--mut);font-weight:600}
+.lad{font-size:13px;margin-top:6px}.lad .f{color:var(--bad)}.lad .ok{color:var(--ok);font-weight:600}
+.grid{display:flex;gap:10px;flex-wrap:wrap}.cand{width:228px;border:2px solid transparent;border-radius:10px;padding:6px;background:var(--inset)}
+.cand.sel{border-color:var(--acc)}.cand.cur{outline:2px solid var(--blue);outline-offset:-2px}.cand img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:6px;background:#222;display:block}
+.cand.port img{aspect-ratio:9/16;height:220px;width:auto;margin:0 auto}.cand .n{font-weight:600;font-size:13px;margin-top:4px}.cand .w{font-size:12px;color:var(--mut)}.cand .x{font-size:12px;color:var(--bad)}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:16px;text-align:center;margin:8px 0}#drop.on{background:rgba(127,127,127,.12)}
+#msg{min-height:22px;margin-top:8px}.err{color:var(--bad)}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9;padding:16px}
+#modal .box{background:var(--panel);color:var(--fg);border-radius:12px;padding:20px;max-width:520px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+[hidden]{display:none!important}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#14181d;--panel:#1d232b;--line:#334050;--fg:#e6ebf0;--mut:#9aa8b6;--inset:#171c22;color-scheme:dark}}
+:root[data-theme=dark]{--bg:#14181d;--panel:#1d232b;--line:#334050;--fg:#e6ebf0;--mut:#9aa8b6;--inset:#171c22;color-scheme:dark}
+</style></head><body><div class="wrap">
+<div class="row" style="margin-bottom:12px"><div style="flex:1;min-width:0"><h1 id="ttl">Beat editor</h1><div class="mut" id="sub">Loading…</div></div>
+ <button class="sec" onclick="window.close()">Close</button></div>
+
+<div class="card"><div class="player"><video id="pv" playsinline preload="auto" data-testid="beat-player"></video><span id="badge" class="badge">In the video now</span></div>
+ <input type="range" id="scrub" min="0" max="1" step="0.01" value="0" oninput="seek(+this.value)" aria-label="Scrub within this beat">
+ <div class="row"><button class="sec" id="playb" onclick="togglePlay()">Play beat</button><span class="tm mut" id="tm">0:00.0</span><span style="flex:1"></span>
+  <span id="pvacts" hidden><button class="sec" data-testid="beat-discard" onclick="discard()">Discard</button> <button data-testid="beat-splice" onclick="splice()">Splice into the video</button></span></div>
+ <div id="msg" class="mut" data-testid="beat-msg"></div></div>
+
+<div class="card"><h2>What is said here</h2><div id="words" class="words" data-testid="beat-stt"></div>
+ <h2 style="margin-top:12px">How the picture was made</h2><div class="kv" id="prompts" data-testid="beat-prompts"></div><div id="lad" class="lad"></div></div>
+
+<div class="card"><h2>Make a new picture for this beat</h2>
+ <label for="rung">Rung</label><div class="row"><select id="rung" style="flex:1" onchange="rungUi()" data-testid="beat-rung"></select>
+  <button id="rungb" onclick="runRung()" data-testid="beat-render-rung">Render this rung</button></div>
+ <div id="own" hidden><div id="drop" ondragover="event.preventDefault();this.classList.add('on')" ondragleave="this.classList.remove('on')" ondrop="dropped(event)">
+   Drop a video or a still here, or <input type="file" id="file" accept="video/*,image/*" style="width:auto" onchange="upload(this.files[0])"></div>
+  <label for="link">…or a link (or a path on this PC)</label><div class="row"><input type="text" id="link" style="flex:1" placeholder="https://…/clip.mp4  or  F:\…\photo.jpg">
+   <select id="tag" style="width:auto"><option value="">label: auto</option><option>FILE</option><option>YOUR FOOTAGE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select>
+   <button class="sec" onclick="addOwn($('link').value.trim())">Add</button></div>
+  <div class="mut" style="font-size:13px;margin-top:6px">A still you add can then be rendered with camera shots (overhead, dolly, pan, zoom) from its card below.</div></div></div>
+
+<div class="card"><h2>Options for this beat</h2><div class="mut" style="font-size:13px;margin-bottom:8px">Tick the ones to show (they play in the order ticked), then preview. Blue outline = in the video now. On a still: pick camera shots and render them.</div>
+ <div id="cands" class="grid" data-testid="beat-cands"></div>
+ <div class="row" style="margin-top:10px"><button id="prevb" onclick="preview()" data-testid="beat-preview" disabled>Preview in the scrubber</button><span class="mut" id="selinfo"></span></div></div>
+</div>
+
+<div id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="mt"><div class="box"><h2 id="mt">Please wait</h2><p id="mm"></p><div class="row" style="justify-content:flex-end"><button onclick="$('modal').hidden=true" data-testid="beat-modal-ok">OK</button></div></div></div>
+
+<script>
+const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const [,,JID,BID]=location.pathname.split('/');const KIND=new URLSearchParams(location.search).get('kind')||'';
+let I=null,RV=null,SEL=[],PREV=null,poll=null;const SID=(()=>{try{let s=sessionStorage.getItem('vs_sid');if(!s){s=Math.random().toString(36).slice(2);sessionStorage.setItem('vs_sid',s)}return s}catch(e){return 'beat'+Date.now()}})();
+const RUNGN={own:'Your footage',stock:'Stock footage',photo:'Real photo',still:'AI still',animate:'AI animation',parallax:'Parallax',headline:'Headline card',supplied:'Your file',imagegen:'AI image',graphics:'Graphics',storyboard:'Storyboard',current:'In the video now',source:'Source clip',illustration:'Illustration',silhouette:'Silhouette'};
+const fmt=t=>{t=Math.max(0,t||0);return Math.floor(t/60)+':'+(t%60).toFixed(1).padStart(4,'0')};
+const sp=()=>I&&I.space=='long'?'?space=long':'';const base=()=>`/files/${JID}/${I.space=='long'?'longedit/':''}short/`;
+function msg(t,bad){$('msg').innerHTML=bad?`<span class="err">${esc(t)}</span>`:esc(t)}
+function wait(t){$('mm').textContent=t;$('modal').hidden=false}
+async function api(url,body){const r=await fetch(url,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ let d={};try{d=await r.json()}catch(e){}if(!r.ok){const e=new Error(d.error||r.statusText);e.status=r.status;e.busy=d.busy;throw e}return d}
+async function guarded(fn){try{return await fn()}catch(e){if(e.busy||e.status===409&&/making|editor in use|Waiting/i.test(e.message)){wait(e.message);return null}msg(e.message,true);return null}}
+
+// ---- the player: the beat inside the finished video, or the rendered preview of the new picture
+function vstart(){return PREV?0:I.beat.start}function vdur(){return I.beat.dur}
+function loadVideo(){const v=$('pv');if(PREV){v.src=`/files/${JID}/${PREV.video}`;$('badge').textContent='PREVIEW — not in the video yet';$('badge').className='badge pv';$('pvacts').hidden=false}
+ else{v.src=I.video?`/files/${JID}/${I.video}?t=${Date.now()}`:'';$('badge').textContent='In the video now';$('badge').className='badge';$('pvacts').hidden=true}
+ v.onloadedmetadata=()=>{v.currentTime=vstart()};$('scrub').max=vdur().toFixed(2)}
+function seek(t){const v=$('pv');v.currentTime=vstart()+t;tick()}
+function togglePlay(){const v=$('pv');if(v.paused){if(v.currentTime<vstart()||v.currentTime>=vstart()+vdur()-0.05)v.currentTime=vstart();v.play()}else v.pause()}
+function tick(){const v=$('pv');if(!I)return;const t=v.currentTime-vstart();if(!v.paused&&t>=vdur()){v.pause();v.currentTime=vstart()}
+ $('scrub').value=Math.max(0,t).toFixed(2);$('tm').textContent=fmt(t)+' / '+fmt(vdur());$('playb').textContent=v.paused?'Play beat':'Pause';
+ document.querySelectorAll('.words span[data-t]').forEach(s=>s.classList.toggle('now',+s.dataset.t<=t&&t<+s.dataset.e))}
+$('pv').addEventListener('timeupdate',tick);$('pv').addEventListener('play',tick);$('pv').addEventListener('pause',tick);
+
+// ---- what is said, how it was made
+function drawInfo(){const b=I.beat;$('ttl').textContent=`Beat editor · ${b.label}${I.space=='long'?' · '+b.id:''}`;document.title='Beat '+b.label+' · '+I.title;
+ $('sub').textContent=`${I.title} · ${I.kind=='short'?'Short':'explainer'} · ${fmt(b.start)}–${fmt(b.start+b.dur)} (${b.dur.toFixed(1)} s)`;
+ const W=I.words||[];$('words').innerHTML=W.length?W.map(([w,t],i)=>`<span data-t="${t}" data-e="${(W[i+1]||[0,vdur()])[1]}" onclick="seek(${Math.max(0,t)})">${esc(w)}</span>`).join(' ')+`<div class="mut" style="font-size:12px;margin-top:4px">Speech-to-text timing of the narration; click a word to jump there.</div>`
+  :`${esc(b.vo||'(no narration in this beat)')}<div class="mut" style="font-size:12px;margin-top:4px">Narration of this beat (no word timings stored).</div>`;
+ const P=I.prompts||{};$('prompts').innerHTML=[['AI image prompt',P.still_prompt],['Animation prompt',P.motion],['Stock searches',(P.queries||[]).join(' · ')],['Subject',P.subject],['Picture source',b.source],['Made by',(b.rungs||[]).join(' · ')]]
+  .map(([k,v])=>`<b>${k}</b><span>${v?esc(v):'<span class="mut">—</span>'}</span>`).join('');
+ $('lad').innerHTML=(b.ladder||[]).map(sl=>`<div>Picture ${esc(String(sl.slot||'').replace(/^#/,''))}: ${(sl.failed||[]).map(([r,w])=>`<span class="f">✗ ${r?esc(r)+': ':''}${esc(w)}</span>`).join(' → ')}${(sl.failed||[]).length?' → ':''}${sl.used?`<span class="ok">✓ ${esc(sl.used)}</span>`:'<b>nothing fired</b>'}</div>`).join('');
+ $('rung').innerHTML=I.rungs.map(r=>`<option value="${r.id}">${esc(r.name)}${r.heavy?' — renders on this PC':''}</option>`).join('');rungUi()}
+function rungUi(){const own=$('rung').value=='own';$('own').hidden=!own;$('rungb').hidden=own}
+
+// ---- options (candidates)
+function drawCands(){const b=RV.beats[BID];if(!b)return;const cur=b.current||[];if(!SEL.length&&!PREV)SEL=[...(b.decision=='chosen'?b.chosen:[])].filter(c=>!cur.includes(c));
+ $('cands').innerHTML=b.cands.filter(c=>!RV.cands[c].missing).map(cid=>{const c=RV.cands[cid],i=SEL.indexOf(cid),img=c.item.type=='image';
+  const name=RUNGN[c.rung]||c.rung;return `<div class="cand ${i>=0?'sel':''} ${cur.includes(cid)?'cur':''} ${I.kind=='short'?'port':''}" data-testid="beat-cand" data-cand="${cid}" data-rung="${esc(c.rung)}">
+  <img loading="lazy" alt="" src="${c.thumb?base()+c.thumb+'?v='+encodeURIComponent(c.key||cid):''}"><div class="n">${esc(name)}${c.item.camera?' · '+esc(c.item.camera):''}</div>
+  ${c.ok?`<div class="w">${esc(c.why||'')}</div>`:`<div class="x">✗ ${esc(c.why||'')}</div>`}${c.item.tag?`<div class="w">on screen: ${esc(c.item.tag)}</div>`:''}
+  <label style="margin:4px 0 0;display:flex;gap:6px;align-items:center;color:var(--fg)"><input type="checkbox" ${i>=0?'checked':''} onchange="tickC('${cid}',this.checked)"> Use${i>=0&&SEL.length>1?' #'+(i+1):''}</label>
+  ${img?`<div class="row" style="margin-top:4px"><select id="sh_${cid}" style="flex:1;padding:5px">${I.shots.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><button class="sec" style="padding:5px 9px" data-testid="beat-shots" onclick="shots('${cid}')">Camera shots</button></div>`:''}</div>`}).join('');
+ $('prevb').disabled=!SEL.length;$('selinfo').textContent=SEL.length?`${SEL.length} picked`:'';
+ const busy=b.busy||'';if(busy)msg(busy);else if(b.msg&&!$('msg').dataset.keep)msg(b.msg);
+ clearTimeout(poll);if(busy)poll=setTimeout(refresh,2000)}
+function tickC(cid,on){SEL=SEL.filter(c=>c!=cid);if(on)SEL.push(cid);drawCands()}
+async function refresh(){try{RV=await api(`/api/jobs/${JID}/review${sp()}`);drawCands()}catch(e){msg(e.message,true)}}
+
+// ---- actions
+const heavy=r=>(I.rungs.find(x=>x.id==r)||{}).heavy;
+async function runRung(){const r=$('rung').value;if(heavy(r)&&I.busy){wait(I.busy);return}$('msg').dataset.keep='';msg('Starting…');
+ const d=await guarded(()=>api(`/api/jobs/${JID}/beat/${BID}/rung${sp()}`,{rung:r}));if(d){RV=d;if(r=='headline'){SEL=[...RV.beats[BID].chosen]}drawCands();setTimeout(refresh,1200)}}
+async function addOwn(src){if(!src)return;msg('Adding your file…');const d=await guarded(()=>api(`/api/jobs/${JID}/beat/${BID}/rung${sp()}`,{rung:'own',src,tag:$('tag').value}));
+ if(d){RV=d;SEL=[...RV.beats[BID].chosen];drawCands();msg('Added. Preview it in the scrubber, or render camera shots if it is a still.')}}
+async function upload(f){if(!f)return;msg('Uploading '+f.name+'…');const fd=new FormData();fd.append('file',f);
+ try{const r=await fetch(`/api/jobs/${JID}/edit/upload`,{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'upload failed');await addOwn(d.path)}catch(e){msg(e.message,true)}}
+function dropped(e){e.preventDefault();$('drop').classList.remove('on');const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)return upload(f);const t=(e.dataTransfer.getData('text/uri-list')||e.dataTransfer.getData('text')||'').trim();if(t)addOwn(t.split('\n')[0])}
+async function shots(cid){if(I.busy){wait(I.busy);return}const move=$('sh_'+cid).value;msg('Rendering camera shots…');
+ const d=await guarded(()=>api(`/api/jobs/${JID}/beat/${BID}/shots${sp()}`,{cid,move}));if(d){RV=d;drawCands();setTimeout(refresh,1500)}}
+async function preview(){if(!SEL.length)return;if(I.busy){wait(I.busy);return}msg('Rendering the beat with the new picture (half resolution)…');
+ const d=await guarded(()=>api(`/api/jobs/${JID}/beat/${BID}/preview${sp()}`,{cands:SEL}));if(!d)return;PREV=d;loadVideo();$('pv').play();msg(`Preview ready (fit: ${d.fit} — ${d.why}). Splice it into the video, or Discard.`)}
+async function discard(){const v=PREV&&PREV.video;PREV=null;loadVideo();msg('Discarded. The video is unchanged.');if(v)api(`/api/jobs/${JID}/beat/${BID}/discard`,{video:v}).catch(()=>{})}
+async function splice(){if(!PREV)return;if(I.busy){wait(I.busy);return}msg('Splicing: only this beat is re-cut and replaced in place…');const v=$('pv');v.pause();v.removeAttribute('src');v.load();
+ const d=await guarded(()=>api(`/api/jobs/${JID}/beat/${BID}/splice${sp()}`,{cands:SEL,sid:SID}));if(!d){loadVideo();return}spliceWait()}
+async function spliceWait(){let d;try{d=await api(`/api/jobs/${JID}/edit/beats`)}catch(e){setTimeout(spliceWait,3000);return}
+ if(d.busy){msg(d.busy);setTimeout(spliceWait,3000);return}PREV=null;
+ if(d.error){msg('Not spliced: '+d.error+' The video is unchanged.',true);loadVideo();return}
+ try{window.opener&&window.opener.postMessage({vsEdited:JID},'*')}catch(e){}await load();msg('Spliced. The video now has the new picture in this beat.')}
+
+async function load(){try{I=await api(`/api/jobs/${JID}/beat/${BID}${KIND?'?kind='+KIND:''}`)}catch(e){$('sub').textContent=e.message;return}
+ drawInfo();loadVideo();if(I.busy)wait(I.busy);
+ try{RV=await api(`/api/jobs/${JID}/beat/${BID}/open${sp()}`,{})}catch(e){if(e.status==409)wait(e.message);else msg(e.message,true);return}SEL=[];drawCands()}
+setInterval(async()=>{if(!I)return;try{const x=await api(`/api/jobs/${JID}/beat/${BID}${KIND?'?kind='+KIND:''}`);I.busy=x.busy}catch(e){}},15000);
+load();
+</script></body></html>
