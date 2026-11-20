@@ -250,7 +250,7 @@ FPS = 30
 
 
 def parallel_parts(cfg, total_secs):
-    k = int(cfg.get("render_parallel", 1) or 1)
+    k = int(cfg.get("render_parallel", 3) or 1)
     return k if k > 1 and total_secs >= CHUNK_MIN_SECS else 1
 
 

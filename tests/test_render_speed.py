@@ -12,7 +12,7 @@ from studio import explainer, media  # noqa: E402
 
 def test_only_long_videos_are_split():
     assert explainer.parallel_parts({"render_parallel": 3}, 600) == 3
-    assert explainer.parallel_parts({}, 600) == 1                      # off by default until tested end to end
+    assert explainer.parallel_parts({}, 600) == 3                      # on by default
     assert explainer.parallel_parts({"render_parallel": 3}, 100) == 1                      # a Short-length video: bundling would cost more
     assert explainer.parallel_parts({"render_parallel": 1}, 3000) == 1
 

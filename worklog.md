@@ -13,8 +13,8 @@ LONG VIDEO log line at the outline (>30 min); Remotion temp cleanup after every 
 
 **Not done / not verified:**
 1. Parallel chunked rendering (explainer._render_chunked) is written and unit-tested (join is sample-exact, resume reuses
-   chunks) but its full end-to-end render was stopped before finishing. It ships OFF: render_parallel = 1. To try it:
-   settings render_parallel = 3, render one long video, compare with a single render. Expect ~2-2.5x on long videos.
+   chunks) but its full end-to-end render was stopped before finishing. It is ON (render_parallel = 3, owner's call); if a
+   chunked render fails it falls back to one piece. Owner will try it. Set 1 to turn it off. Expect ~2-2.5x.
 2. Beat editor: Preview and Splice were never run in the window (tested: info, rungs, own file, camera shots, busy modal,
    on a job copy through a test server). First real use: try one beat on a finished job and check the splice.
 3. Video Studio restart to load 3536df1 onwards (beat editor, watchdog, cleanup). Ask the owner first.
