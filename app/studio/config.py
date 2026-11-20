@@ -92,6 +92,8 @@ DEFAULTS = {
                                       # "legacy" = the old small CSS zoom/parallax in Remotion (owner made framed the default, 2026-11-16).
     "short_concurrency": "auto",      # Remotion workers: auto = render_workers_auto; a number overrides (studio/short.py)
     "auto_target_min": 15,            # Auto length: about this many minutes, longer only when essential (writer.length_target)
+    "render_parallel": 1,             # 3 = long videos render (NOT yet end-to-end tested; 1 = off, proven single render) as this many chunks at once (one Chrome per render is serial; explainer.py)
+    "job_warn_hours": 3,              # a job running longer gets a warning on its page and in its log (pipeline._slow_job_watcher)
     "render_workers_auto": 4,         # best measured on this PC (2026-11-19: 4 workers 178 frames/min; 2 -> 90, 6 -> 120, 8 -> 133)
     "render_frame_cache_gb": 2,       # Remotion OffthreadVideo cache cap (uncapped it grows into free RAM: +8.5 GB seen)
     "render_min_free_gb": 6,          # below this free RAM at render start: LOW RESOURCES warning on the job page

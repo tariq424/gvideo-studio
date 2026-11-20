@@ -1,4 +1,27 @@
 <!-- PICKUP (read first) -->
+## PICKUP — 2026-11-19 9:00 PM (owner low on credits; resume Saturday)
+
+**State:** pipeline idle and runnable. 42020 runs code up to 0ea86dd (restarted 18:5x); everything after is committed but
+loads at the next Video Studio restart (no restart was done for it). Robotics job 20261119_061158 TABLED (cancelled,
+temp files deleted; an earlier version is already on the main channel). 31 GB of leftover Remotion temp copies deleted.
+
+**Done today (all committed):** own voices (Original + American, crash = commit memory, guarded); length policy (Auto ~15
+min, longer only if essential, set length = minimum, no cap); render workers 4 + 2 GB frame cache; Publisher: linked parts
+only for channels that can't take >15 min (CutTV, VeryTV are "Eligible", not enabled) + Studio welcome-pop-up fix (live on
+42030); beat editor window (/beat/<job>/<beat>, "Edit beat" in the ladder panel); slow-job watchdog (job_warn_hours 3);
+LONG VIDEO log line at the outline (>30 min); Remotion temp cleanup after every render.
+
+**Not done / not verified:**
+1. Parallel chunked rendering (explainer._render_chunked) is written and unit-tested (join is sample-exact, resume reuses
+   chunks) but its full end-to-end render was stopped before finishing. It ships OFF: render_parallel = 1. To try it:
+   settings render_parallel = 3, render one long video, compare with a single render. Expect ~2-2.5x on long videos.
+2. Beat editor: Preview and Splice were never run in the window (tested: info, rungs, own file, camera shots, busy modal,
+   on a job copy through a test server). First real use: try one beat on a finished job and check the splice.
+3. Video Studio restart to load 3536df1 onwards (beat editor, watchdog, cleanup). Ask the owner first.
+4. Nov 17 job 20261117_012237's main-channel save: uploaded, but YouTube processing timed out; Video Studio retries it
+   (resume, no re-upload). Check it finished.
+
+<!-- previous pickup -->
 ## PICKUP — 2026-11-19 3:30 PM (status before the owner's reboot)
 
 **Running state**

@@ -387,6 +387,8 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         secs = o["sections"]
         words = size_budgets(secs, words, flex, o.get("over_reason"), log, cfg["wpm"])
         log(f"  outline: {len(secs)} sections, {words} words (~{words / cfg['wpm']:.1f} min)")
+        if words / cfg["wpm"] > float(cfg.get("long_warn_min", 30)):   # owner, 2026-11-19: a 68.5-min explainer took all day
+            log(f"  LONG VIDEO: ~{words / cfg['wpm']:.0f} min planned (essential points named by the outline); expect a long job")
         outline_str = " | ".join(f"{i+1}. {s['title']}" for i, s in enumerate(secs))
         # 3. sections
         total_vis = sum(max(2, round(s["words"] / cfg["wpm"] * 60 / spv)) for s in secs)

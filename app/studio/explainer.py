@@ -204,6 +204,19 @@ def render(job, plan, cfg, meta, log, stop=lambda: False, out_name=None):
            f"--props={_render_props(job, cfg, log, stop)}", *short.render_flags(cfg, log, job),
            "--jpeg-quality=100", "--crf=16", "--log=info", f"--gl={short._gl(cfg)}"]
     log(f"Rendering the explainer with Remotion ({total / 60:.1f} min of video)...")
+    t_render = time.time()
+    k = parallel_parts(cfg, total)
+    if k > 1:
+        try:
+            _render_chunked(job, cfg, log, stop, rdir, tmp, total, k, cmd)
+            if final.exists(): final.unlink()
+            media.ff("-i", tmp, "-c", "copy", "-movflags", "+faststart", final); tmp.unlink(missing_ok=True)
+            if not out_name: _srt_and_description(job, plan, meta, o, slug, log)
+            log(f"FINAL: {final} ({media.dur(final) / 60:.1f} min)")
+            return final
+        except RuntimeError as e:
+            if str(e) == "cancelled": raise
+            log(f"  parallel render failed ({str(e)[:200]}); rendering in one piece instead")
     for attempt in range(3):
         p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         last, t0, tail = "", time.time(), []
@@ -220,9 +233,119 @@ def render(job, plan, cfg, meta, log, stop=lambda: False, out_name=None):
         raise RuntimeError("Remotion explainer render failed: " + " / ".join(x for x in tail[-4:] if x)[:400])
     if final.exists(): final.unlink()
     media.ff("-i", tmp, "-c", "copy", "-movflags", "+faststart", final); tmp.unlink(missing_ok=True)
+    cleanup_remotion_temp(t_render - 120, log)
     if not out_name: _srt_and_description(job, plan, meta, o, slug, log)
     log(f"FINAL: {final} ({media.dur(final) / 60:.1f} min)")
     return final
+
+
+# ---------------------------------------------------------------- parallel chunks (owner, 2026-11-19)
+# One Remotion render = one Chrome browser, and that browser turns out frames essentially one at a time: 2, 4 or 8 workers all
+# gave ~300-360 frames/min with the PC 65% idle (a 68.5-min explainer would have taken ~6.5 h). Separate renders DO scale
+# (~780 frames/min with three side by side). So a long video is bundled ONCE, then rendered as `render_parallel` frame ranges at
+# the same time; each chunk writes its video and its own uncompressed audio (exact to the sample, so the joins never click),
+# and ffmpeg joins them without re-encoding. Finished chunks survive a stop: Resume renders only what is missing.
+CHUNK_MIN_SECS = 240          # shorter videos render in one piece (bundling costs ~3 min)
+FPS = 30
+
+
+def parallel_parts(cfg, total_secs):
+    k = int(cfg.get("render_parallel", 1) or 1)
+    return k if k > 1 and total_secs >= CHUNK_MIN_SECS else 1
+
+
+def _render_chunked(job, cfg, log, stop, rdir, tmp, total, k, cmd):
+    import hashlib, shutil, threading
+    from . import short
+    nframes = int(round(total * FPS))
+    cdir = job / "build" / "_chunks"; cdir.mkdir(parents=True, exist_ok=True)
+    props = Path(next(a.split("=", 1)[1] for a in cmd if a.startswith("--props=")))
+    sig = hashlib.sha1(props.read_bytes() + (job / "build" / "public" / "teaser.json").read_bytes()).hexdigest()[:16]
+    man = cdir / "manifest.json"
+    old = json.loads(man.read_text(encoding="utf-8")) if man.exists() else {}
+    if old.get("sig") != sig or old.get("k") != k or old.get("frames") != nframes:   # the timeline changed: nothing reusable
+        for f in cdir.glob("*"):
+            if f.is_file(): f.unlink()
+            else: shutil.rmtree(f, ignore_errors=True)
+    edges = [round(i * nframes / k) for i in range(k + 1)]
+    parts = [(i, edges[i], edges[i + 1] - 1) for i in range(k)]
+    man.write_text(json.dumps({"sig": sig, "k": k, "frames": nframes}), encoding="utf-8")
+
+    def done(i, a, b):
+        v, w = cdir / f"c{i:02}.mp4", cdir / f"c{i:02}.wav"
+        return media.ok(v) and media.ok(w, 0.1) and abs(media.dur(v) - (b - a + 1) / FPS) < 0.5
+    todo = [x for x in parts if not done(*x)]
+    if len(todo) < k: log(f"  {k - len(todo)} of {k} chunk(s) already rendered (kept from the last run)")
+    t_start = time.time()
+    if todo:
+        bundle = cdir / "bundle"
+        if not (bundle / "index.html").exists():
+            log(f"  bundling once for {len(todo)} parallel chunk(s)...")
+            r = subprocess.run([short._npx(), "remotion", "bundle", "src/Root.tsx", f"--public-dir={job / 'build' / 'public'}",
+                                f"--out-dir={bundle}"], cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if r.returncode != 0: raise RuntimeError("bundle failed: " + (r.stdout + r.stderr)[-300:])
+        flags = [a for a in cmd[6:] if not a.startswith(("--public-dir=", "--log="))]
+        procs = {}
+        for i, a, b in todo:
+            v, w = cdir / f"c{i:02}.mp4", cdir / f"c{i:02}.wav"
+            c = [short._npx(), "remotion", "render", str(bundle), "Teaser", str(v), *flags, f"--frames={a}-{b}",
+                 f"--separate-audio-to={w}", "--log=info"]
+            procs[i] = (subprocess.Popen(c, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                         errors="replace"), a, b)
+        log(f"  rendering {len(todo)} chunk(s) in parallel: " + ", ".join(f"frames {a}-{b}" for _, a, b in procs.values()))
+        state = {i: "" for i in procs}; tails = {i: [] for i in procs}
+        def pump(i, pr):
+            for line in pr.stdout:
+                line = line.strip()
+                if line: state[i] = line; tails[i] = (tails[i] + [line])[-20:]
+                if "VS-MEDIA-ERROR" in line: log("  Remotion media error: " + line[line.index("VS-MEDIA-ERROR") + 15:][:300])
+        ths = [threading.Thread(target=pump, args=(i, pr), daemon=True) for i, (pr, _, _) in procs.items()]
+        for t in ths: t.start()
+        t0 = time.time()
+        while any(pr.poll() is None for pr, _, _ in procs.values()):
+            if stop():
+                for pr, _, _ in procs.values(): pr.kill()
+                raise RuntimeError("cancelled")
+            if time.time() - t0 > 60:
+                got = 0
+                for i, (pr, a, b) in procs.items():
+                    m = re.search(r"Rendered (\d+)/", state[i]); got += int(m.group(1)) if m else (b - a + 1 if pr.poll() == 0 else 0)
+                want = sum(b - a + 1 for _, a, b in procs.values()); el = time.time() - t_start
+                rate = got / el * 60 if el > 0 else 0
+                log(f"  Rendered {got}/{want} frames in {len(procs)} parallel chunk(s), {rate:.0f} frames/min"
+                    + (f", about {(want - got) / rate:.0f} min left" if rate > 0 else ""))
+                t0 = time.time()
+            time.sleep(2)
+        for t in ths: t.join(timeout=5)
+        bad = [i for i, (pr, a, b) in procs.items() if pr.returncode != 0 or not done(i, a, b)]
+        if bad:
+            for i in bad:
+                for l in tails[i][-6:]: log(f"  | chunk {i}: " + l[:200])
+            raise RuntimeError(f"chunk(s) {', '.join(map(str, bad))} failed")
+        shutil.rmtree(bundle, ignore_errors=True)
+    vl, al = cdir / "v.txt", cdir / "a.txt"
+    vl.write_text("".join(f"file 'c{i:02}.mp4'\n" for i, _, _ in parts), encoding="utf-8")
+    al.write_text("".join(f"file 'c{i:02}.wav'\n" for i, _, _ in parts), encoding="utf-8")
+    media.ff("-f", "concat", "-safe", 0, "-i", vl, "-f", "concat", "-safe", 0, "-i", al, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+             "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", tmp, timeout=3600)
+    if abs(media.dur(tmp) - total) > 1.0: raise RuntimeError(f"joined video is {media.dur(tmp):.1f}s, expected {total:.1f}s")
+    el = max(1, time.time() - t_start)
+    log(f"  joined {k} chunk(s): {media.dur(tmp) / 60:.1f} min" + (f" (rendered at {nframes / el * 60:.0f} frames/min)" if todo else ""))
+    shutil.rmtree(cdir, ignore_errors=True)
+    cleanup_remotion_temp(t_start - 120, log)
+
+
+def cleanup_remotion_temp(since, log=print):
+    """Remotion leaves a copy of every render's media in %TEMP% (remotion-webpack-bundle-*, up to 5 GB each, never removed when a
+    render is killed: 31 GB found 2026-11-19). Remove ours (made since `since`); anything still in use simply fails to delete."""
+    import shutil, tempfile
+    freed = 0
+    for d in Path(tempfile.gettempdir()).glob("remotion-*"):
+        try:
+            if d.is_dir() and d.stat().st_mtime >= since:
+                sz = sum(f.stat().st_size for f in d.rglob("*") if f.is_file()); shutil.rmtree(d); freed += sz
+        except Exception: pass
+    if freed: log(f"  freed {freed / 2**30:.1f} GB of Remotion temporary files")
 
 
 def _srt_and_description(job, plan, meta, o, slug, log):

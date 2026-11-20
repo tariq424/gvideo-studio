@@ -146,6 +146,7 @@ class Studio:
                         j.save(status="stopped"); j.log("Interrupted (the app or PC restarted). Press Resume to continue; finished work is kept.")
         except Exception: pass
         threading.Thread(target=self._editor_wait_watcher, daemon=True).start()
+        threading.Thread(target=self._slow_job_watcher, daemon=True).start()
         threading.Thread(target=self._worker, daemon=True).start()
 
     def jobs_dir(self): d = Path(config.load()["jobs_dir"]); d.mkdir(parents=True, exist_ok=True); return d
@@ -219,6 +220,31 @@ class Studio:
                 job.save(status="queued", pause=None, pause_req=False, cancel_req=False, cancelled=False)
                 job.log("Editor session released; continuing automatically.")
                 self._enqueue(jid)
+
+    def _slow_job_watcher(self):
+        """owner, 2026-11-19 ("a job ran way too long"): a job running longer than job_warn_hours (3) gets a warning on its page
+        and in its log - how long, which stage, and what is slow (free RAM, render speed) - so the owner hears of it early."""
+        started, warned = {}, set()
+        while True:
+            time.sleep(60)
+            try:
+                jid = self.current
+                if not jid: continue
+                started.setdefault(jid, time.time())
+                hrs = float(config.load().get("job_warn_hours", 3) or 0)
+                el = time.time() - started[jid]
+                if hrs <= 0 or el < hrs * 3600 or jid in warned: continue
+                warned.add(jid); j = self.job(jid); st = j.state
+                try:
+                    from . import tts
+                    ram, _ = tts.memory_headroom(); hogs = tts.memory_hogs(3)
+                except Exception: ram, hogs = 0.0, ""
+                msg = (f"this job has been running {el / 3600:.1f} h (now at '{st.get('stage', '?')}'). Long sources and long "
+                       f"videos take longest; free RAM {ram:.1f} GB" + (f" (biggest: {hogs})" if hogs else "") +
+                       ". Stop it from the job page if it should not take this long.")
+                j.save(resource_warning=msg); j.log("SLOW JOB: " + msg)
+            except Exception:
+                pass
 
     def _editor_wait_watcher(self):
         while True:
