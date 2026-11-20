@@ -82,7 +82,7 @@ html.popup #ov{display:block;max-width:100%;max-height:62vh;margin:0 auto;backgr
 html.popup main{grid-template-columns:1fr;padding:0;max-width:none}
 html.popup main>section:first-child{display:none}
 html.popup #detail{max-width:1280px;margin:16px auto;background:transparent;border:0;padding:0}
-html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp):not(#scr_rung):not(#scr_source):not(#scr_lad){display:none}
+html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp):not(#scr_rung):not(#scr_source):not(#scr_lad):not(#scr_top){display:none}
 .pill.test{background:#f8d7da;color:#a94442;border-color:#f1b0b7;font-size:11px;padding:2px 8px;animation:testpulse 2.4s ease-in-out infinite}
 @keyframes testpulse{0%,100%{opacity:.55}50%{opacity:1}}
 </style></head><body>
@@ -437,7 +437,7 @@ function edTick(){scTick();const v=$('ov');if(!v||!ED.beats.length)return;const 
 function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?edAt(v.currentTime):null;d=d||ED.last||{};ED.last=d;scDraw();
  let h=`<div class="ed-bar">`;
  if(d.busy)h+=`<span class="rv-badge" style="color:var(--acc)">${esc(d.busy)}</span>`;
- else if(b&&b.editable)h+=`<button data-testid="edit-at" data-beat="${b.id}" onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind!='short'?' · '+b.id:''})</button>`;
+ else if(b&&b.editable)h+=`<button data-testid="edit-at" data-beat="${b.id}" onclick="openBeat('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind!='short'?' · '+b.id:''})</button>`;
  else if(b)h+=`<span class="mut" style="font-size:13px">${esc(b.label)}: not editable (title/end card)</span>`;
  else h+=`<span class="mut" style="font-size:13px">Play or scrub to a beat to edit it</span>`;
  if(!d.busy&&ED.beats.some(x=>x.editable))h+=`<select data-testid="edit-jump" aria-label="Jump to beat" style="width:auto" onchange="edJump(this.value)"><option value="">Jump to beat…</option>${ED.beats.filter(x=>x.editable).map(x=>`<option value="${x.id}" ${b&&b.id==x.id?'selected':''}>${esc(x.label)}${ED.kind!='short'?' · '+x.id:''} (${fmtT(x.start)})${x.own?' · your footage':''}</option>`).join('')}</select>`;
@@ -484,7 +484,12 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <span data-testid="scrub-time" id="scr_t" style="font-variant-numeric:tabular-nums;font-weight:600">0:00.0</span><span class="mut" style="font-size:13px">/ ${fmtTs(D)}</span>
   <span data-testid="scrub-beat" id="scr_b" class="rv-badge">—</span>
   <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div></div></div></div>`;
- el.innerHTML=h;scTick()}
+ el.innerHTML=h;scTop();scTick()}
+// owner, 2026-11-20: the script line, picture source, "Made by" and the ladder sit ABOVE the video, not under the scrubber
+function scTop(){const ov=$('ov');if(!ov||!ov.parentElement)return;let top=$('scr_top');
+ if(!top){top=document.createElement('div');top.id='scr_top';top.setAttribute('data-testid','scrub-info-top')}
+ if(top.nextElementSibling!==ov)ov.parentElement.insertBefore(top,ov);top.innerHTML='';
+ for(const id of ['scr_vo','scr_rung','scr_source','scr_lad']){document.querySelectorAll('#'+id).forEach(x=>{if(x.parentElement!==top)top.appendChild(x)})}}
 // ---- how each stretch's picture was made (owner, 2026-11-10: "I don't see the source of the clip, e.g. stock video or the rung")
 const RUNGN={ai_image:'AI image',chatgpt_chain:'ChatGPT image chain',static_image:'still image',card:'headline card',meta_chain:'Meta image → video',flow:'Google Flow video'};
 function stName(s){const h=String(s.how||'');const m=h.match(/^rung (\w+)/);if(/^trip /.test(h))return'your other clips ('+h.slice(5)+')';
@@ -522,7 +527,7 @@ function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.curren
  $('scr_b').dataset.beat=b?b.id:'';
  const e=$('scr_e');e.disabled=!(b&&b.editable)||!!busy||!v.paused;e.title=!v.paused?'Stop the video first':busy?String(busy):'';
  document.querySelectorAll('.sc-seg,.sc-bn').forEach(x=>x.classList.toggle('cur',!!b&&x.dataset.beat==b.id))}
-function scEdit(){const v=$('ov');if(!v)return;v.pause();const b=edAt(v.currentTime);if(b&&b.editable)edOpen(b.id)}
+function scEdit(){const v=$('ov');if(!v)return;v.pause();const b=edAt(v.currentTime);if(b&&b.editable)openBeat(b.id)}   // the beat editor window (2026-11-20)
 
 async function edTarget(t){try{await rvPost(`/api/jobs/${sel}/edit/target`,{target:t});ED.open=null;lastKey='';loadJobs()}catch(e){alert(e.message)}}
 async function edAll(a){try{await edPost(`/api/jobs/${sel}/edit_all/${a}`,{});if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message;else alert(e.message)}}
