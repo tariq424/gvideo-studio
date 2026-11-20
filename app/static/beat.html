@@ -29,14 +29,14 @@ input[type=text],select{width:100%;background:var(--inset);color:var(--fg);borde
 <div class="row" style="margin-bottom:12px"><div style="flex:1;min-width:0"><h1 id="ttl">Beat editor</h1><div class="mut" id="sub">Loading…</div></div>
  <button class="sec" onclick="window.close()">Close</button></div>
 
+<div class="card"><h2>What is said here</h2><div id="words" class="words" data-testid="beat-stt"></div>
+ <h2 style="margin-top:12px">How the picture was made</h2><div class="kv" id="prompts" data-testid="beat-prompts"></div><div id="lad" class="lad"></div></div>
+
 <div class="card"><div class="player"><video id="pv" playsinline preload="auto" data-testid="beat-player"></video><span id="badge" class="badge">In the video now</span></div>
  <input type="range" id="scrub" min="0" max="1" step="0.01" value="0" oninput="seek(+this.value)" aria-label="Scrub within this beat">
  <div class="row"><button class="sec" id="playb" onclick="togglePlay()">Play beat</button><span class="tm mut" id="tm">0:00.0</span><span style="flex:1"></span>
   <span id="pvacts" hidden><button class="sec" data-testid="beat-discard" onclick="discard()">Discard</button> <button data-testid="beat-splice" onclick="splice()">Splice into the video</button></span></div>
  <div id="msg" class="mut" data-testid="beat-msg"></div></div>
-
-<div class="card"><h2>What is said here</h2><div id="words" class="words" data-testid="beat-stt"></div>
- <h2 style="margin-top:12px">How the picture was made</h2><div class="kv" id="prompts" data-testid="beat-prompts"></div><div id="lad" class="lad"></div></div>
 
 <div class="card"><h2>Make a new picture for this beat</h2>
  <label for="rung">Rung</label><div class="row"><select id="rung" style="flex:1" onchange="rungUi()" data-testid="beat-rung"></select>
@@ -70,9 +70,9 @@ async function guarded(fn){try{return await fn()}catch(e){if(e.busy||e.status===
 
 // ---- the player: the beat inside the finished video, or the rendered preview of the new picture
 function vstart(){return PREV?0:I.beat.start}function vdur(){return I.beat.dur}
-function loadVideo(){const v=$('pv');if(PREV){v.src=`/files/${JID}/${PREV.video}`;$('badge').textContent='PREVIEW — not in the video yet';$('badge').className='badge pv';$('pvacts').hidden=false}
+function loadVideo(){const v=$('pv');v.onloadedmetadata=()=>{v.currentTime=vstart()};if(PREV){v.src=`/files/${JID}/${PREV.video}`;$('badge').textContent='PREVIEW — not in the video yet';$('badge').className='badge pv';$('pvacts').hidden=false}
  else{v.src=I.video?`/files/${JID}/${I.video}?t=${Date.now()}`:'';$('badge').textContent='In the video now';$('badge').className='badge';$('pvacts').hidden=true}
- v.onloadedmetadata=()=>{v.currentTime=vstart()};$('scrub').max=vdur().toFixed(2)}
+ if(v.readyState>=1)v.currentTime=vstart();v.oncanplay=()=>{if(v.currentTime<vstart()-0.05||v.currentTime>vstart()+vdur())v.currentTime=vstart()};$('scrub').max=vdur().toFixed(2)}
 function seek(t){const v=$('pv');v.currentTime=vstart()+t;tick()}
 function togglePlay(){const v=$('pv');if(v.paused){if(v.currentTime<vstart()||v.currentTime>=vstart()+vdur()-0.05)v.currentTime=vstart();v.play()}else v.pause()}
 function tick(){const v=$('pv');if(!I)return;const t=v.currentTime-vstart();if(!v.paused&&t>=vdur()){v.pause();v.currentTime=vstart()}
@@ -87,7 +87,7 @@ function drawInfo(){const b=I.beat;$('ttl').textContent=`Beat editor · ${b.labe
   :`${esc(b.vo||'(no narration in this beat)')}<div class="mut" style="font-size:12px;margin-top:4px">Narration of this beat (no word timings stored).</div>`;
  const P=I.prompts||{};$('prompts').innerHTML=[['AI image prompt',P.still_prompt],['Animation prompt',P.motion],['Stock searches',(P.queries||[]).join(' · ')],['Subject',P.subject],['Picture source',b.source],['Made by',(b.rungs||[]).join(' · ')]]
   .map(([k,v])=>`<b>${k}</b><span>${v?esc(v):'<span class="mut">—</span>'}</span>`).join('');
- $('lad').innerHTML=(b.ladder||[]).map(sl=>`<div>Picture ${esc(String(sl.slot||'').replace(/^#/,''))}: ${(sl.failed||[]).map(([r,w])=>`<span class="f">✗ ${r?esc(r)+': ':''}${esc(w)}</span>`).join(' → ')}${(sl.failed||[]).length?' → ':''}${sl.used?`<span class="ok">✓ ${esc(sl.used)}</span>`:'<b>nothing fired</b>'}</div>`).join('');
+ $('lad').innerHTML=(b.ladder||[]).map(sl=>`<div>Picture ${esc(String(sl.slot||'').replace(/^#/,''))}: ${(sl.failed||[]).map(([r,w])=>`<span class="f">✗ ${r?esc(r)+': ':''}${esc(w)}</span>`).join(' → ')}${(sl.failed||[]).length?' → ':''}${sl.used?`<span class="ok">✓ ${esc(sl.used)}</span>`:'<b>nothing fired</b>'}${!(sl.failed||[]).length&&sl.used?' <span class="mut">— nothing failed: the first rung tried was used</span>':''}</div>`).join('');
  $('rung').innerHTML=I.rungs.map(r=>`<option value="${r.id}">${esc(r.name)}${r.heavy?' — renders on this PC':''}</option>`).join('');rungUi()}
 function rungUi(){const own=$('rung').value=='own';$('own').hidden=!own;$('rungb').hidden=own}
 
