@@ -196,7 +196,15 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text="", timeline=None):
         media.ff(*ins, "-filter_complex", flt, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                  "-movflags", "+faststart", "-t", f"{total:.3f}", tmp)
         if media.dur(tmp) < total - 0.5: raise RuntimeError("the result came out shorter")
-        tmp.replace(mp4)
+        # owner, 2026-11-20: a player, Explorer's preview or the backup can hold the video open for a moment; Windows then refuses
+        # the swap ("Access is denied") and the Short went out with no music - its musical pauses as dead air. Retry for 2 min.
+        for i in range(40):
+            try: tmp.replace(mp4); break
+            except PermissionError:
+                if i == 39: raise RuntimeError(f"{mp4.name} stayed open in another program for 2 minutes (close any player or "
+                                               f"preview showing it); the music version is kept as {tmp.name}")
+                if i == 0: log(f"  {mp4.name} is open in another program; waiting to swap in the music version...")
+                time.sleep(3)
         (mp4.parent / (mp4.stem + "_music.json")).write_text(json.dumps({"hook": str(hook or ""), "bed": str(bed or ""), "hook_secs": h,
                                                                          "moods": [hm, bm], "swells": [list(x) for x in swells_used[0]],
                                                                          "swell_track": str(swells_used[1] or "")}, indent=1), encoding="utf-8")
