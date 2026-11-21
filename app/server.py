@@ -93,6 +93,11 @@ def create():
     if b.get("mode") == "smoke" and not b.get("url") and not b.get("transcript") and not (f and f.filename):   # no source: the standard smoke video
         from studio import config as _cfg; b["url"] = _cfg.load().get("smoke_source", "")
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
+    if not b.get("url") and not (f and f.filename) and b.get("mode") != "smoke":   # owner, 2026-11-20: refuse at once, not as a failed job
+        nw = len(str(b.get("transcript") or "").split())
+        if nw < 150: return jsonify(error=f"With no YouTube link, the pasted text is the whole source: it has {nw} words and a video needs at "
+                                          "least 150. Paste the YouTube link too (the text box is only an extra for videos without captions), "
+                                          "add more text, or use 'Describe a video' for a short idea."), 400
     try: mins, ssec = float(b.get("minutes", 0) or 0), float(b.get("short_secs", 175) or 175)
     except (TypeError, ValueError): return jsonify(error="Video lengths must be numbers."), 400
     # 0 = auto (~15 min, longer only when essential); a set length is a minimum of 3 minutes or more, no cap (owner, 2026-11-19)
