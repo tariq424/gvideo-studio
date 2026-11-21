@@ -364,7 +364,13 @@ def memory_hogs(n=5):
         import psutil
         tot = {}
         for pr in psutil.process_iter(["name", "memory_info"]):
-            try: tot[pr.info["name"]] = tot.get(pr.info["name"], 0) + pr.info["memory_info"].rss
+            try:
+                name = pr.info["name"]
+                if name and name.lower().startswith("chrome"):   # Video Studio's own render browsers are not the owner's Chrome
+                    try:
+                        if "--headless" in " ".join(pr.cmdline()): name = "Video Studio render (headless Chrome)"
+                    except Exception: pass
+                tot[name] = tot.get(name, 0) + pr.info["memory_info"].rss
             except Exception: pass
         return ", ".join(f"{k} {v / 2**30:.1f} GB" for k, v in sorted(tot.items(), key=lambda x: -x[1])[:n])
     except Exception: return ""
