@@ -313,7 +313,7 @@ def make_notes(llm, meta, transcript, words, log, stop=None, workdir=None):
         log(f"  notes {i}/{len(chunks)}")
         notes.append(llm.chat(SYSTEM, NOTES.format(i=i, n=len(chunks), title=title, channel=channel, people=(meta.get("description") or "")[:1200],
                                                   max_words=note_budget, chunk=ch), max_tokens=4000).strip())
-    if sum(len(n.split()) for n in notes) < 60 * len(notes):
+    if sum(len(n.split()) for n in notes) < (10 if meta.get("own_footage") else 60) * len(notes):   # his own short clip: few notes is fine
         raise RuntimeError("The AI returned (nearly) empty notes; stopping so the script isn't invented. Check the model/key.")
     notes_txt = "\n\n".join(f"[Part {i}]\n{n}" for i, n in enumerate(notes, 1))
     if workdir: (workdir / "notes.txt").write_text(notes_txt, encoding="utf-8")

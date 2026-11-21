@@ -85,7 +85,9 @@ def load(src, upload, title, credit, log):
     else:
         text = (src / "pasted.txt").read_text(encoding="utf-8"); kind = "text"
     text = re.sub(r"[ \t]+", " ", text).strip()
-    if len(text.split()) < 150: raise RuntimeError(f"The {kind} has only {len(text.split())} words; need at least 150 to make a video.")
+    # owner, 2026-11-20: "for my own videos don't impose the word limit" - his footage carries the video; research fills the length
+    if len(text.split()) < 150 and not own: raise RuntimeError(f"The {kind} has only {len(text.split())} words; need at least 150 to make a video.")
+    if len(text.split()) < 150 and own: log(f"  your video has {len(text.split())} spoken words: your footage carries it, research fills the length")
     name = upload.stem.replace("_", " ") if upload else "Pasted notes"
     # owner, 2026-11-19: an audio made with NotebookLM is the owner's own work; naming the tool makes viewers think it is AI
     # slop, so the tool's name is never the credit and is taken out of a title made from the file name
