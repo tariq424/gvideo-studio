@@ -154,6 +154,10 @@ def colour(cfg, video, work, log=print):
         notes = []
         for title in [r["name"], r["area"]]:   # the place itself first
             f = wiki_fact(f"{title}, {r['country']}" if title and r["country"] and title != r["country"] else title) or wiki_fact(title) if title else None
+            # owner, 2026-11-20: "Pine Street" (filmed in Nashua, NH) fetched Seattle's Pine Street article and the narration put the
+            # video in Seattle. A street or spot name is only kept when its article names the town it was filmed in.
+            if f and title == r["name"] and r["area"] and r["area"] != title and r["area"].lower() not in f["fact"].lower():
+                log(f"  place colour: the article for '{title}' is about somewhere else (no mention of {r['area']}); not used"); f = None
             if f and f not in notes: notes.append(f)
         for s in sights:
             if len(notes) >= int(cfg.get("place_max_notes", 6)): break
