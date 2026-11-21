@@ -17,7 +17,8 @@ COLOUR = ("PLACE COLOUR (from the footage's GPS: {where}{when}). Colour the vide
           "below. ALL THREE are required: (1) open with one line on where we are before the first soundbite / beat; (2) during the "
           "video, one or two short bridges about the surroundings at natural pauses, each naming a nearby place from the notes (never "
           "about the guest's own life, never inside a soundbite); (3) close with one line on what else to see nearby, naming it. Keep "
-          "each brief: the guest's own story stays the backbone.")
+          "each brief: the guest's own story stays the backbone. The LOCATION IS {where} - the video's own metadata is the only "
+          "source of truth for where it was filmed: never place it anywhere else, and ignore any note that names another city.")
 
 
 def terms(pc):
