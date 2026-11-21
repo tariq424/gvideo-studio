@@ -148,7 +148,7 @@ def build_section(cfg, job, sid, vo_text, log):
     js = d / f"v2_{sid}.json"
     if js.exists(): return json.loads(js.read_text(encoding="utf-8"))
     import unicodedata
-    text = unicodedata.normalize("NFKD", vo_text).encode("ascii", "ignore").decode()
+    from . import tts as _t; text = _t.ascii_text(vo_text)   # dashes keep words apart (2026-11-20)
     caps = groups(word_times(job / "voice" / f"{sid}.wav", text))
     caps = pick_emojis(cfg, caps, log)
     for c in caps:

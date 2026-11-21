@@ -460,6 +460,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         plan = normalize(plan)
         plan = fresh_hook(llm, plan, log)   # owner, 2026-11-19: the opening line must not repeat a later one
         plan = ensure_hook(llm, plan, log, cfg)   # owner, 2026-11-20: detect a hook; add one when there is none
+        plan = proofread(llm, plan, log)   # owner, 2026-11-20: spell check before the voice records it
         w = sum(_nw(s["vo"]) for s in plan["sections"])
         tk = f" Tokens in/out: {llm.tokens_in}/{llm.tokens_out}" if llm.tokens_in else ""
         log(f"Script ready: {len(plan['sections'])} sections, {w} words (~{w / cfg['wpm']:.1f} min), "
@@ -1118,6 +1119,41 @@ a credit, a greeting, or names {owner}).
 Narration (facts only):
 {body}
 Reply with JSON: {{"is_hook": true|false, "why": "a few words", "hook": "... or empty", "drop_first": true|false}}"""
+
+
+PROOF = """Proofread this video narration before it is recorded. Find ONLY: misspellings, two words run together
+("roboticsfinally"), a word split in two, doubled words ("the the"), wrong homophones (its/it's, their/there), and broken
+punctuation that would make a narrator read it wrongly. Do NOT reword, shorten, restyle or fact-check anything.
+For each problem give the exact wrong text as it appears (a few words of it, copied exactly) and the corrected text.
+Narration, one numbered part per line:
+{parts}
+Reply with JSON: {{"fixes": [{{"part": 1, "from": "exact wrong text", "to": "corrected text"}}]}} (an empty list when it is clean)"""
+
+
+def proofread(llm, plan, log):
+    """owner, 2026-11-20 ("always spell check before render, measure twice cut once"): every narration is proofread before the
+    voice records it. Only small, exact fixes are applied (spelling, run-together words, doubled words); anything that
+    rewords is refused."""
+    import difflib
+    secs = [x for x in plan.get("sections") or [] if x.get("vo")]
+    if not secs: return plan
+    parts = "\n".join(f"{i + 1}. {x['vo']}" for i, x in enumerate(secs))
+    def chk(j):
+        if not isinstance(j.get("fixes"), list): raise ValueError("fixes must be a list")
+    try:
+        j = llm.trace("proofread").chat_json("You are a meticulous proofreader. Reply with JSON only.", PROOF.format(parts=parts[:60000]),
+                                             max_tokens=4000, check=chk)
+    except Exception as e:
+        log(f"  proofread skipped ({str(e)[:120]})"); return plan
+    done = []
+    for f in j.get("fixes") or []:
+        try: i = int(f.get("part")) - 1; a, b = str(f.get("from") or ""), str(f.get("to") or "")
+        except (TypeError, ValueError): continue
+        if not (0 <= i < len(secs)) or not a or a == b or secs[i]["vo"].count(a) != 1: continue
+        if len(a) > 60 or abs(len(a) - len(b)) > 12 or difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio() < 0.6: continue
+        secs[i]["vo"] = secs[i]["vo"].replace(a, b, 1); done.append(f"{a} -> {b}")
+    log(f"  proofread: {len(done)} fix(es)" + (": " + "; ".join(done)[:400] if done else " (clean)"))
+    return plan
 
 
 def ensure_hook(llm, plan, log, cfg=None):

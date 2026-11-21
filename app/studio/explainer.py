@@ -57,7 +57,7 @@ def section_words(cfg, job, s, log):
     if f.exists(): wt = [tuple(x) for x in json.loads(f.read_text(encoding="utf-8"))]
     else:
         import unicodedata
-        text = unicodedata.normalize("NFKD", s["vo"]).encode("ascii", "ignore").decode()
+        from . import tts as _t; text = _t.ascii_text(s["vo"])   # dashes keep words apart (2026-11-20)
         wt = C.word_times(job / "voice" / f"{s['id']}.wav", text); f.write_text(json.dumps(wt), encoding="utf-8")
     cf = d / f"icons_{s['id']}.json"
     if cf.exists(): groups = json.loads(cf.read_text(encoding="utf-8"))

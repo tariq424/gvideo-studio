@@ -334,9 +334,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
         punch_up(cfg, plan, log, force=smoke, budget=None if smoke else int(total * 1.05))   # smoke: every beat gets its joke here; otherwise only beats still without one; extra asides only while the budget allows
         if not smoke:
-            from .writer import fresh_hook, ensure_hook
+            from .writer import fresh_hook, ensure_hook, proofread
             plan = fresh_hook(llm, plan, log)   # owner, 2026-11-19: the opening line must not repeat a later one
             plan = ensure_hook(llm, plan, log, cfg)   # owner, 2026-11-20: detect a hook; add one when there is none
+            plan = proofread(llm, plan, log)   # owner, 2026-11-20: spell check before the voice records it
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0
@@ -1000,7 +1001,7 @@ def _do_voice_inner(job, plan, cfg, wg, log, stop):
         progress(job, sum(len(g) for g in groups[:gi]) + len(grp), len(todo))
         if stop(): raise RuntimeError("cancelled")
         text = " ".join(s["vo"] for s in grp)
-        ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()   # WanGP mangles non-ASCII
+        ascii_text = tts.ascii_text(text)   # WanGP mangles non-ASCII; dashes keep words apart (2026-11-20)
         bw = vd / f"batch_{grp[0]['id']}.wav"
         if not media.ok(bw):
             r = None

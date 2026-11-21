@@ -91,6 +91,37 @@ def try_kokoro(cfg, items, log, tag, stop):
         return False
 
 
+# owner, 2026-11-20 ("roboticsfinally", "crunchit's", "capacityrobotics", "deemauss", "three dollars five billions"): text went to
+# the voice through NFKD + ascii-ignore, which DELETED every em dash ("robotics—finally" -> "roboticsfinally"), and Kokoro reads
+# "demos" as the Greek word (dee-moss). ascii_text() keeps the words apart; speakable() also re-spells words the voice gets wrong.
+TYPO = {"\u2014": ", ", "\u2013": ", ", "\u2012": ", ", "\u2015": ", ", "\u2212": "-", "\u2026": "...", "\u2018": "'", "\u2019": "'",
+        "\u201a": "'", "\u201b": "'", "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u00a0": " ", "\u2009": " ", "\u200a": " ",
+        "\u202f": " ", "\u00b7": " ", "\u2022": ", ", "\u00d7": " times ", "\u2192": " to ", "\u00b0": " degrees", "%": " percent"}
+SAY = {"demos": "demoes", "Demos": "Demoes", "DEMOS": "DEMOES"}   # the voice only; captions keep the real spelling
+
+
+def ascii_text(text):
+    """Plain ASCII with every word kept apart (dashes become pauses, curly quotes straight) - for the voice and its captions."""
+    import re, unicodedata
+    t = str(text or "")
+    for k, v in TYPO.items():
+        if k == "%": continue
+        t = t.replace(k, v)
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode()
+    t = re.sub(r"\s+,", ",", re.sub(r",\s*,", ",", t))
+    return re.sub(r"[ \t]{2,}", " ", t).strip()
+
+
+def speakable(text, cfg=None):
+    """ascii_text + the re-spellings the voice needs (settings 'pronounce': {"word": "spoken as"} adds more)."""
+    import re
+    t = ascii_text(text)
+    say = dict(SAY, **((cfg or {}).get("pronounce") or {}))
+    for w, r in say.items():
+        t = re.sub(rf"\b{re.escape(w)}\b", r, t)
+    return t
+
+
 def voice_speed(voice):
     """owner, 2026-11-20 ("the narrator speaks in a very hurried voice"): am_puck read at ~193 wpm and am_fenrir ~187 against ~155
     for a calm narrator; those two are slowed to a normal narration pace."""

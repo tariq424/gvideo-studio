@@ -6,7 +6,9 @@ from . import media, qa, charts
 STYLE = ", cinematic photorealistic, natural dramatic lighting, 35mm film look, highly detailed, no text, no watermark"
 
 def chunks(text, limit=85):
-    sents = re.findall(r"[^.?!]+[.?!]+[\"')\]]*|[^.?!]+$", text); out, cur, n = [], [], 0
+    # owner, 2026-11-20: "$3.5 billion" was split at its decimal point and read "three dollars ... five billion"
+    text = re.sub(r"(?<=\d)\.(?=\d)", "\u2024", text)   # protect decimals while splitting into sentences
+    sents = [x.replace("\u2024", ".") for x in re.findall(r"[^.?!]+[.?!]+[\"')\]]*|[^.?!]+$", text)]; out, cur, n = [], [], 0
     for s in (x.strip() for x in sents if x.strip()):
         w = len(s.split())
         if n + w > limit and cur: out.append(" ".join(cur)); cur, n = [], 0
@@ -61,7 +63,7 @@ def _do_voice_inner(job, plan, cfg, wg, log, stop):
     if tts.is_local(cfg):   # all chunks in one Kokoro run; the per-section concat below is unchanged
         import unicodedata
         items = [(text, d / f"{s['id']}_{ci}.wav") for s in plan["sections"] if not media.ok(d / f"{s['id']}.wav")
-                 for ci, text in enumerate(chunks(unicodedata.normalize("NFKD", s["vo"]).encode("ascii", "ignore").decode()))]
+                 for ci, text in enumerate(chunks(tts.speakable(s["vo"], cfg)))]
         if not tts.try_kokoro(cfg, items, log, "Narration", stop) and not wg.alive():
             raise RuntimeError("Kokoro narration failed and WanGP (the fallback) is not running. Start Wan2GP in Pinokio, then press Resume.")
     for si, s in enumerate(plan["sections"]):
@@ -70,7 +72,7 @@ def _do_voice_inner(job, plan, cfg, wg, log, stop):
         if media.ok(out): continue
         parts = []
         import unicodedata
-        vo_ascii = unicodedata.normalize("NFKD", s["vo"]).encode("ascii", "ignore").decode()  # WanGP mangles non-ASCII in output filenames
+        vo_ascii = tts.speakable(s["vo"], cfg)  # WanGP mangles non-ASCII in output filenames; dashes kept as pauses (2026-11-20)
         for ci, text in enumerate(chunks(vo_ascii)):
             seed += 1; p = d / f"{s['id']}_{ci}.wav"
             if not media.ok(p):
