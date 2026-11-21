@@ -367,9 +367,14 @@ def memory_hogs(n=5):
             try:
                 name = pr.info["name"]
                 if name and name.lower().startswith("chrome"):   # Video Studio's own render browsers are not the owner's Chrome
-                    try:
-                        if "--headless" in " ".join(pr.cmdline()): name = "Video Studio render (headless Chrome)"
-                    except Exception: pass
+                    q = pr
+                    for _ in range(4):   # a render browser and its children (renderer, GPU) - by its own or a parent's profile
+                        try:
+                            c = " ".join(q.cmdline())
+                            if "--headless" in c or "puppeteer_dev_chrome_profile" in c: name = "Video Studio render (headless Chrome)"; break
+                            q = q.parent()
+                            if q is None: break
+                        except Exception: break
                 tot[name] = tot.get(name, 0) + pr.info["memory_info"].rss
             except Exception: pass
         return ", ".join(f"{k} {v / 2**30:.1f} GB" for k, v in sorted(tot.items(), key=lambda x: -x[1])[:n])
