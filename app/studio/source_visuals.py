@@ -255,13 +255,22 @@ def _best_framed(local, start, duration, dest, total, req, log):
     return s2
 
 
+def own(job):
+    """The source is the owner's own footage (an uploaded video of his, or 'This is my own video'): no copyright caps."""
+    try: return bool(json.loads((Path(job) / "src" / "meta.json").read_text(encoding="utf-8")).get("own_footage"))
+    except (OSError, ValueError): return False
+
+
 def clip_secs(cfg):
-    """Seconds of real source footage per clip (settings source_clip_secs; 2-20)."""
+    """Seconds of real source footage per clip (settings source_clip_secs; 2-20). The owner's own footage: own_clip_secs (30),
+    so a beat can play his shot for its whole length (owner, 2026-11-20: "use my full video footage")."""
+    if cfg.get("_own_footage"): return max(2.0, min(60.0, float(cfg.get("own_clip_secs", 30) or 30)))
     try: return max(2.0, min(20.0, float(cfg.get("source_clip_secs", 8))))
     except (TypeError, ValueError): return 8.0
 
 
 def max_uses(cfg, key="source_visual_max_uses", default=6):
+    if cfg.get("_own_footage"): return 100000   # his own footage: every beat it matches (the caps are for other people's videos)
     try: return max(0, min(20, int(cfg.get(key, default))))
     except (TypeError, ValueError): return default
 
@@ -270,6 +279,7 @@ def make(cfg, job, workspace, sec, log):
     """-> full-frame video (or screenshot image) item {"type", "path", ...}, or None so the usual ladder continues."""
     if not cfg.get("source_visuals", True):
         return None
+    if own(job) and not cfg.get("_own_footage"): cfg = dict(cfg, _own_footage=True)
     req = _request(sec, max_s=clip_secs(cfg))
     if not req and cfg.get("source_clips_auto", True):
         req = auto_request(job, sec, secs=clip_secs(cfg))

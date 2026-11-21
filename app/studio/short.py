@@ -503,9 +503,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         cand = []
         for x in plan["sections"]:
             if x.get("cta") or x["id"] not in tm or any(c.get("own") for c in pick.get(x["id"], [])): continue
-            r = source_visuals.auto_request(job, x, min_overlap=int(cfg.get("source_over_stock_min", 4)))
+            mine = source_visuals.own(job)   # his own footage beats generic stock on even a weak match (owner, 2026-11-20)
+            r = source_visuals.auto_request(job, x, min_overlap=2 if mine else int(cfg.get("source_over_stock_min", 4)))
             if r: cand.append((r["match"], x["id"], r["start"]))
-        cap = max(0, min(2, int(cfg.get("source_visual_max_uses", 2))))
+        cap = len(cand) if source_visuals.own(job) else max(0, min(2, int(cfg.get("source_visual_max_uses", 2))))
         for score, bid, start in sorted(cand, reverse=True)[:cap]:
             if pick.get(bid):
                 log(f"  {bid}: generic stock set aside: the source itself covers this beat (caption cue at {start:.1f}s, {score} shared words)")
