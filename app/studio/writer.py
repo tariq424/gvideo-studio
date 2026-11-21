@@ -615,9 +615,17 @@ def fit_length(llm, plan, secs, words, cfg, log, stop=None):
             if not isinstance(j.get("vo"), str): raise ValueError("narration missing")
             m = _nw(j["vo"]); tries.append((abs(m - b["words"]), j["vo"]))
             if not 0.92 * b["words"] <= m <= 1.08 * b["words"]: raise ValueError(f"narration is {m} words but must be {b['words']} (+/-8%)")
-        how = ("Expand it with more detail, examples and context from the facts below (only real content from them, never padding)." if n < b["words"]
+        how = ("Expand it with more detail, examples and context from the facts and research below (only real content from them, never padding)." if n < b["words"]
                else "Shorten it: cut the weakest sentences and any repetition.")
-        try: new = llm.chat_json(SYSTEM, RESIZE.format(stitle=x["title"], words=b["words"], n=n, how=how, points="\n".join("- " + p for p in b.get("points", [])),
+        pts = list(b.get("points", []))
+        if n < b["words"]:   # owner, 2026-11-20: "get more from research if that will fill the gap of required length"
+            try:
+                from . import websearch
+                snips, _ = websearch.light(cfg, f"{plan.get('title') or ''} {x['title']}".strip(), log, llm=llm)
+                pts += [f"(research) {t[:400]}" for t in (snips or [])[:4]]
+                if snips: log(f"  length: section {i + 1} gets {min(4, len(snips))} researched fact(s) to fill it")
+            except Exception as e: log(f"  length: research for section {i + 1} failed ({str(e)[:80]})")
+        try: new = llm.chat_json(SYSTEM, RESIZE.format(stitle=x["title"], words=b["words"], n=n, how=how, points="\n".join("- " + p for p in pts),
                                                        audience=audience_line(cfg), vo=x["vo"]), max_tokens=3000, check=chk)["vo"]
         except Exception:
             new = min(tries)[1] if tries else None

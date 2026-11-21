@@ -264,7 +264,7 @@ def own(job):
 def clip_secs(cfg):
     """Seconds of real source footage per clip (settings source_clip_secs; 2-20). The owner's own footage: own_clip_secs (30),
     so a beat can play his shot for its whole length (owner, 2026-11-20: "use my full video footage")."""
-    if cfg.get("_own_footage"): return max(2.0, min(60.0, float(cfg.get("own_clip_secs", 30) or 30)))
+    if cfg.get("_own_footage"): return max(2.0, min(3600.0, float(cfg.get("own_clip_secs", 3600) or 3600)))   # no limit: as long as the beat
     try: return max(2.0, min(20.0, float(cfg.get("source_clip_secs", 8))))
     except (TypeError, ValueError): return 8.0
 
