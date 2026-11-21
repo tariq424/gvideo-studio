@@ -684,12 +684,15 @@ class Studio:
                     short.do_fallback(j.dir, sp, cfg, wg, log, stop, full=s.get("visual_review") == "every", dbg=dbg)
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
-                    out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
+                    # owner, 2026-11-20: the Short is announced (short_output) only AFTER its music is in - announced first, the job page's
+                    # player opened it at once and Windows refused the music swap (two Shorts went out silent)
+                    out = short.do_render(j.dir, sp, cfg, meta, log, stop)
                     from . import music
                     if not s.get("smoke") or cfg.get("music_in_smoke", False): music.mix(out, cfg, log, music.hook_secs_short(j.dir), seed=jid, timeline=j.dir / "short" / "public" / "teaser.json", text=sp.get("title", "") + ": " + " ".join(x["vo"] for x in sp["sections"]))   # hook cue + ducked bed (your tracks)
                     from . import talkinghead
                     if s.get("presenter") and talkinghead.enabled(cfg):   # talking head over the hook (Hugging Face; optional, never fails the job)
                         out = talkinghead.overlay_short(j.dir, sp, cfg, out, log)
+                    j.save(short_output=str(out))
                     from . import capcut
                     if capcut.enabled(cfg) and capcut.pending(j.dir):   # ladder v2 rung 7: one CapCut session per video (off by default)
                         out = capcut.run(cfg, j.dir, out, sp, log)
