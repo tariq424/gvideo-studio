@@ -201,7 +201,17 @@ async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn')
 async function openJob(){const id=($('openid').value||'').trim();if(!id)return;try{await j(`/api/jobs/${id}`)}catch(e){alert('No job '+id);return}selectJob(id)}
 // a click on a job far down the list opened it off-screen at the top of the page ("clicking has no effect"): bring it into view
 function selectJob(id){sel=id;editing=false;planCache=null;lastKey='';loadJobs().then(()=>{const d=$('detail');if(!d)return;const b=d.getBoundingClientRect();if(b.top<0||b.top>innerHeight*0.6)d.scrollIntoView({behavior:'smooth',block:'start'})})}
-async function loadJobs(){const js=await j('/api/jobs');runUI(js);$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="selectJob('${x.id}')"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
+// Jobs list (owner, 2026-11-22: "otherwise it is a very long trudge"): the 10 newest - plus any job still running or queued - on top;
+// everything older folds into Archived. The fold remembers whether you opened it, and opens itself when the selected job is in it.
+const RECENT=10;let jArchOpen=false;
+function jobRow(x){return `<div class="job ${x.id==sel?'sel':''}" onclick="selectJob('${x.id}')"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`}
+async function loadJobs(){const js=await j('/api/jobs');runUI(js);
+ if(!js.length){$('jobs').innerHTML='No jobs yet.';if(sel)loadDetail();return}
+ const live=x=>!['finished','error','stopped','cancelled'].includes(x.status),top=(x,i)=>i<RECENT||live(x);
+ const recent=js.filter(top),old=js.filter((x,i)=>!top(x,i));
+ const fd=$('jarch');if(fd)jArchOpen=fd.open;const openIt=jArchOpen||old.some(x=>x.id==sel);
+ $('jobs').innerHTML=recent.map(jobRow).join('')+(old.length?`<details id="jarch" ${openIt?'open':''} style="margin-top:6px"><summary class="mut" style="cursor:pointer;padding:6px 2px">Archived (${old.length} older jobs)</summary>${old.map(jobRow).join('')}</details>`:'');
+ if(sel)loadDetail()}
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 let lastKey='';
 // one status line per output (Short / Explainer): finished (with file), working (stage, beat n of N), or waiting

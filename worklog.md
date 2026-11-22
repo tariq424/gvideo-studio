@@ -15,8 +15,8 @@ LONG VIDEO log line at the outline (>30 min); Remotion temp cleanup after every 
 1. Parallel chunked rendering (explainer._render_chunked) is written and unit-tested (join is sample-exact, resume reuses
    chunks) but its full end-to-end render was stopped before finishing. It is ON (render_parallel = 3, owner's call); if a
    chunked render fails it falls back to one piece. Owner will try it. Set 1 to turn it off. Expect ~2-2.5x.
-2. Beat editor: Preview and Splice were never run in the window (tested: info, rungs, own file, camera shots, busy modal,
-   on a job copy through a test server). First real use: try one beat on a finished job and check the splice.
+2. Beat editor: Preview + Splice + Undo VERIFIED 2026-11-22 on a copy of job 20261108_002340 (b0 -> stock: preview 392 s incl. one-time setup, splice 244 s,
+   frames same, audio identical, clean decode; undo restores it at 49 dB PSNR - the only change is the one-time keyframe re-encode).
 3. Video Studio restart to load 3536df1 onwards (beat editor, watchdog, cleanup). Ask the owner first.
 4. Nov 17 job 20261117_012237's main-channel save: uploaded, but YouTube processing timed out; Video Studio retries it
    (resume, no re-upload). Check it finished.
