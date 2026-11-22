@@ -11,12 +11,16 @@ const Card: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }>
   <div style={{ background: C.card, border: `2px solid ${C.line}`, borderRadius: 34, padding: "40px 44px", backdropFilter: "blur(6px)", boxShadow: "0 30px 80px rgba(0,0,0,0.45)", ...style }}>{children}</div>
 );
 
-// graphics live in the upper-middle band (y ≈ 330–1080); captions sit below
-const Band: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <AbsoluteFill style={{ top: 170, height: 760, bottom: "auto", alignItems: "center", justifyContent: "center", padding: "0 70px" }}>
-    <div style={{ transform: "scale(0.72)", transformOrigin: "center top" }}>{children}</div>
-  </AbsoluteFill>
-);
+// owner, 2026-11-21: "you can't block faces like that. Every such block must be at the bottom of the render" - graphics sit in
+// the lower band, bottom-anchored just above the captions (y ≈ 1000–1430); faces in a vertical shot live in the upper half
+const Band: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { width, height } = useVideoConfig(); const tall = height > width;   // explainers (16:9) render through the same composition
+  return (
+    <AbsoluteFill style={{ top: tall ? 1000 : height - 520, height: tall ? 430 : 330, bottom: "auto", alignItems: "center", justifyContent: "flex-end", padding: "0 70px" }}>
+      <div style={{ transform: `scale(${tall ? 0.6 : 0.5})`, transformOrigin: "center bottom" }}>{children}</div>
+    </AbsoluteFill>
+  );
+};
 
 const Hook: React.FC<{ lines: string[]; accent?: number }> = ({ lines, accent = -1 }) => {
   const { f, fps } = useT();

@@ -33,8 +33,8 @@ const Tag: React.FC<{ tag: string; hideFrom: number }> = ({ tag, hideFrom }) => 
 const Icon: React.FC<{ e: string; dur: number }> = ({ e, dur }) => {
   const f = useCurrentFrame(); const { fps, width, height } = useVideoConfig(); const t = f / fps; const tall = height > width;
   const k = interpolate(t, [0, 0.18], [0.6, 1], { extrapolateRight: "clamp" }); const o = interpolate(t, [0, 0.12, dur - 0.15, dur], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  return <div style={{ position: "absolute", left: 0, right: 0, top: tall ? 1240 : height - 330, textAlign: "center", fontSize: tall ? 110 : 96, opacity: o,
-    transform: `scale(${k})`, fontFamily: "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.6))" }}>{e}</div>;
+  return <div style={{ position: "absolute", right: tall ? 36 : 60, top: tall ? 1290 : height - 300, textAlign: "right", fontSize: tall ? 84 : 80, opacity: o,
+    transform: `scale(${k})`, transformOrigin: "right center", fontFamily: "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.6))" }}>{e}</div>;
 };
 
 export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats, progress }) => {
