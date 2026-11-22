@@ -91,6 +91,7 @@ DEFAULTS = {
     "research_commentary": True,      # before each joke: a little web research on the topic (Wikipedia, DuckDuckGo) -> tidbit + opinion (owner, 2026-11-18)
                                       # "legacy" = the old small CSS zoom/parallax in Remotion (owner made framed the default, 2026-11-16).
     "short_concurrency": "auto",      # Remotion workers: auto = render_workers_auto; a number overrides (studio/short.py)
+    "youtube_main_on": True,   # main-channel auto-save (youtube_main.py); owner paused it 2026-11-22 while it blocked the publisher
     "youtube_main_visibility": "Unlisted",   # main-channel saves (youtube_main.py): Unlisted so end screens work; "Private" to hide
     "owner_name": "Tariq Hasnain",    # never said in narration; a source from this channel counts as the owner's own video
     "auto_target_min": 15,            # Auto length: about this many minutes, longer only when essential (writer.length_target)
