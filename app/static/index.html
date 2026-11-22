@@ -154,7 +154,7 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp):not(#scr_rung
    <textarea id="dbgbps" data-testid="debug-breakpoints" aria-label="Breakpoints" rows="3" placeholder="stock_found == 0&#10;beat == 3&#10;treatment == stock|photo|still|animate|parallax|3d|card&#10;escalated_past == stock&#10;narration contains &quot;word&quot;"></textarea></details>
   <div class="row" style="margin-top:12px"><button data-testid="make-video" id="makebtn" aria-label="Make video" onclick="createJob()">Make video</button><button class="sec" id="stopbtn" data-testid="stop-video" aria-label="Stop video" style="display:none;border-color:var(--bad);color:var(--bad)" onclick="stopVideo()">Stop video</button><span id="jobrun" data-testid="job-running" style="font-weight:600"></span><span id="cmsg" data-testid="make-message" class="mut"></span></div>
  </div>
- <div class="card"><h2>Jobs</h2><div class="row" id="openrow" style="margin-bottom:6px"><input type="text" id="openid" data-testid="open-job-id" placeholder="Open a job by ID (e.g. 20261011_192216)" style="flex:1" onkeydown="if(event.key=='Enter')openJob()"><button class="sec" data-testid="open-job" onclick="openJob()">Open</button></div><div id="jobs" class="mut">No jobs yet.</div></div>
+ <div class="card"><h2>Jobs</h2><div class="row" id="openrow" style="margin-bottom:6px"><input type="text" id="openid" data-testid="open-job-id" placeholder="Open a job by ID (e.g. 20261011_192216)" style="flex:1" onkeydown="if(event.key=='Enter')openJob()"><button class="sec" data-testid="open-job" onclick="openJob()">Open</button></div><div id="jobs" class="mut">No jobs yet.</div><div id="jarch" hidden style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px"><div class="mut" style="font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Archived <span id="jarchn"></span></div><div class="row" style="margin-bottom:6px"><input type="search" id="jarchq" placeholder="Search archived jobs (title, ID, status)" style="flex:1" onkeydown="if(event.key=='Enter')jArchSearch()"><button class="sec" onclick="jArchSearch()">Search</button><button class="sec" onclick="$('jarchq').value='';jArchSearch()">Clear</button></div><div id="jarchbody"></div></div></div>
 </section>
 <section><div class="card" id="detail"><span class="mut">Select a job to see progress.</span></div></section>
 </main>
@@ -203,14 +203,24 @@ async function openJob(){const id=($('openid').value||'').trim();if(!id)return;t
 function selectJob(id){sel=id;editing=false;planCache=null;lastKey='';loadJobs().then(()=>{const d=$('detail');if(!d)return;const b=d.getBoundingClientRect();if(b.top<0||b.top>innerHeight*0.6)d.scrollIntoView({behavior:'smooth',block:'start'})})}
 // Jobs list (owner, 2026-11-22: "otherwise it is a very long trudge"): the 10 newest - plus any job still running or queued - on top;
 // everything older folds into Archived. The fold remembers whether you opened it, and opens itself when the selected job is in it.
-const RECENT=10;let jArchOpen=false;
+const RECENT=10;
+// Jobs (owner, 2026-11-22): the 10 newest (plus anything running) as a list; older jobs in an Archived ROTATOR, one card at a
+// time, Prev/Next wrap, with a search that keeps only the matching jobs in the rotator.
+let JARCH={all:[],q:'',idx:0};
 function jobRow(x){return `<div class="job ${x.id==sel?'sel':''}" onclick="selectJob('${x.id}')"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`}
+function jArchSearch(){JARCH.q=($('jarchq').value||'').trim().toLowerCase();JARCH.idx=0;jArchPaint()}
+function jArchStep(d){JARCH.idx+=d;jArchPaint()}
+function jArchPaint(){const q=JARCH.q,all=JARCH.all;
+ const list=q?all.filter(x=>[x.title,x.url,x.id,x.status,x.stage].join(' ').toLowerCase().includes(q)):all;
+ $('jarch').hidden=!all.length;$('jarchn').textContent=`(${all.length})`;
+ if(!list.length){$('jarchbody').innerHTML=`<div class="mut">No archived job matches “${esc(q)}”.</div>`;return}
+ JARCH.idx=((JARCH.idx%list.length)+list.length)%list.length;
+ $('jarchbody').innerHTML=`<div class="row" style="justify-content:space-between;margin-bottom:6px"><button class="sec" onclick="jArchStep(-1)">‹ Prev</button><span class="mut">${JARCH.idx+1} of ${list.length}${q?' matching':''}</span><button class="sec" onclick="jArchStep(1)">Next ›</button></div>`+jobRow(list[JARCH.idx])}
 async function loadJobs(){const js=await j('/api/jobs');runUI(js);
- if(!js.length){$('jobs').innerHTML='No jobs yet.';if(sel)loadDetail();return}
+ if(!js.length){$('jobs').innerHTML='No jobs yet.';JARCH.all=[];jArchPaint();if(sel)loadDetail();return}
  const live=x=>!['finished','error','stopped','cancelled'].includes(x.status),top=(x,i)=>i<RECENT||live(x);
- const recent=js.filter(top),old=js.filter((x,i)=>!top(x,i));
- const fd=$('jarch');if(fd)jArchOpen=fd.open;const openIt=jArchOpen||old.some(x=>x.id==sel);
- $('jobs').innerHTML=recent.map(jobRow).join('')+(old.length?`<details id="jarch" ${openIt?'open':''} style="margin-top:6px"><summary class="mut" style="cursor:pointer;padding:6px 2px">Archived (${old.length} older jobs)</summary>${old.map(jobRow).join('')}</details>`:'');
+ $('jobs').innerHTML=js.filter(top).map(jobRow).join('');
+ JARCH.all=js.filter((x,i)=>!top(x,i));jArchPaint();
  if(sel)loadDetail()}
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 let lastKey='';
