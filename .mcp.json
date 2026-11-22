@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "flow-studio": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": ["F:\\code\\video-blender\\workspace\\tools\\mcp-google-flow\\dist\\main.js"],
+      "env": {
+        "FLOW_MCP_HOME": "F:\\code\\video-blender\\workspace\\flow-mcp-session",
+        "FLOW_MCP_OUTPUT_DIR": "F:\\videos\\flow_mcp\\output",
+        "FLOW_MCP_INPUT_DIRS": "F:\\videos\\flow_mcp\\input",
+        "FLOW_MCP_MAX_CREDITS": "0",
+        "FLOW_MCP_LANGUAGE": "en"
+      }
+    }
+  }
+}
