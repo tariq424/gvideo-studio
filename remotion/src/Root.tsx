@@ -6,6 +6,7 @@ import { TeaserProps } from "./types";
 import { ReconBackdrop, Recon } from "./Recon";
 import { Shot } from "./Background";
 import { BeatClip, BeatClipProps } from "./BeatClip";
+import { Diorama, DioramaSpec } from "./Diorama";
 
 // one background shot on its own (visual-review thumbnails and 2-second previews): props {bg, secs}; --public-dir = the job's short folder
 type ShotProps = { bg: any; secs: number; w?: number; h?: number };
@@ -28,6 +29,19 @@ const Root: React.FC = () => (
     calculateMetadata={async ({ props }) => {
       const p = props as ReconProps;
       return { durationInFrames: Math.ceil(p.secs * FPS), width: p.w || 1920, height: p.h || 1080 };
+    }}
+  />
+  <Composition
+    id="Diorama"
+    component={Diorama as React.FC<any>}
+    fps={FPS}
+    width={1920}
+    height={1080}
+    durationInFrames={FPS * 6}
+    defaultProps={{ spec: { title: "Two steps to delivery", props: [{ kind: "house", label: "Packed" }, { kind: "truck", label: "On the way" }, { kind: "factory" }, { kind: "windmill" }] }, secs: 6 } as { spec: DioramaSpec; secs: number }}
+    calculateMetadata={async ({ props }) => {
+      const p = props as { spec: DioramaSpec; secs: number; w?: number; h?: number };
+      return { durationInFrames: Math.max(1, Math.ceil(p.secs * FPS)), width: p.w || 1920, height: p.h || 1080 };
     }}
   />
   <Composition

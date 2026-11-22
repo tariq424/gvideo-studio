@@ -177,6 +177,7 @@ DEFAULTS = {
     "studio3d_samples": 32, "studio3d_fps": 24, "studio3d_max_secs": 10, "studio3d_timeout": 1500,
     "republish_watch": True,   # owner, 2026-11-19: a finished video changed outside the editor still replaces its published / staged copies
     "newsroom_staging": "F:/videos/newsroom/staging",   # where Newsroom keeps its staged copies (compared with the job's files)
+    "threejs_on": True,   # owner, 2026-11-21: our own Three.js 3D diorama rung, just before the card in both ladders (60 s cap)
     "hyperframes_on": True,   # owner, 2026-11-18: HyperFrames motion graphic rung (local render only), after motion, before the card
     "motion_rung": True, "motion_look": "paper",   # owner, 2026-11-12: drawn animation = last resort before the card; paper | whiteboard
     "graphics_claude": True,          # v2: when no template fits, Claude writes a Remotion composition for the beat

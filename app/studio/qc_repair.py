@@ -449,10 +449,18 @@ def _rung_hyperframes(ctx):
     return _checked(ctx, clip, why) if clip else (None, None, why)
 
 
+def _rung_threejs(ctx):
+    """owner, 2026-11-21: our own Three.js 3D styles (Diorama first), rendered locally by Remotion - the last try before the card.
+    60 s cap; the why says succeeded / failed to render / timed out. Off with threejs_on: false."""
+    from . import threejs_beat
+    clip, why = threejs_beat.make(ctx["cfg"], ctx["vo"], ctx["need"] if ctx["need"] > 0 else 6.0, ctx["W"], ctx["H"], ctx["work"], ctx["log"], key=f"t3d_{ctx['key']}")
+    return _checked(ctx, clip, why) if clip else (None, None, why)
+
+
 RUNGS = [("stock", _rung_stock), ("meta_chain", _rung_metachain), ("ai_image", _rung_aiimage), ("chatgpt_chain", _rung_chatgpt),
          ("blender", _rung_blender), ("video", _rung_video), ("cloud", _rung_cloud), ("marble", _rung_marble),
          ("local_i2v_own_frame", _rung_ownframe), ("wangp", _rung_wangp), ("static_image", _rung_static),
-         ("studio3d", _rung_studio3d), ("physics", _rung_physics), ("motion", _rung_motion), ("hyperframes", _rung_hyperframes), ("card", _rung_card)]   # 3D studio, then drawings (physics, motion, HyperFrames), then the card (owner, 2026-11-12/13/18)
+         ("studio3d", _rung_studio3d), ("physics", _rung_physics), ("motion", _rung_motion), ("hyperframes", _rung_hyperframes), ("threejs", _rung_threejs), ("card", _rung_card)]   # threejs: 2026-11-21   # 3D studio, then drawings (physics, motion, HyperFrames), then the card (owner, 2026-11-12/13/18)
 
 
 # ------------------------------------------------------------------ splice

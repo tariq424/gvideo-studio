@@ -757,6 +757,8 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 elif s.get("subject"):
                     chain.append("reconstruction")
                     items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"], k5, cap if k5 == 0 else "", moment=phases.get(s["id"], "")), "rung": "reconstruction"}); k5 += 1
+                elif (t3 := _threejs_item(cfg, sd, s, sl, chain, why, failed, log)):   # our own 3D diorama before the card (2026-11-21)
+                    items.append(t3)
                 else:
                     chain.append("headline")
                     items.append({"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"})
@@ -945,6 +947,8 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
                 vb["capcut"] = "pending"; chain.append("capcut (pending: one CapCut session after the render)")
         else: vb["capcut"] = "off"
     # 8-10: the beat's visual for the render (provisional when CapCut is pending)
+    t3 = _threejs_item(cfg, sd, s, sl, chain, why, failed, log)   # 8b. our own 3D diorama (2026-11-21)
+    if t3: return t3
     chain.append("headline")   # 9. headline card (the illustration rung was removed 2026-10-21)
     return {"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}
 
@@ -960,6 +964,18 @@ def rotate_still(src, deg, nose, dst):
     x0, y0 = (big.width - W) // 2, (big.height - H) // 2
     big.crop((x0, y0, x0 + W, y0 + H)).save(dst, quality=93)
     return Path(dst)
+
+def _threejs_item(cfg, sd, s, sl, chain, why, failed, log):
+    """owner, 2026-11-21: our own Three.js diorama, tried just before the headline card (60 s cap). -> item | None"""
+    if not cfg.get("threejs_on", True): return None
+    from . import threejs_beat
+    clip, w = _safe(log, "threejs", lambda: threejs_beat.make(cfg, s["vo"], FB_SECS, 1080, 1920, sd / "fallback", log, key=f"t3d_{sl['key']}")) or (None, "crashed (see log)")
+    if not clip:
+        chain.append("threejs"); why.append(f"threejs: {w}"); failed.append("threejs"); return None
+    chain.append("threejs")
+    return {"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
+            "tag": "3D", "rung": "threejs"}
+
 
 def _rel_sd(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 

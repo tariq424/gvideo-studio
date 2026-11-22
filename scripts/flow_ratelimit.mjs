@@ -36,7 +36,9 @@ let done = 0;
 for (let i = 0; i < count; i++) {
   const prompt = PROMPTS[i % PROMPTS.length], t0 = Date.now();
   const q = await call("flow_generate", { prompt, mode: "image", aspect: "16:9", variants: 1, confirm: false });
-  const qt = text(q); const quote = (qt.match(/"?quote_id"?\s*[:=]\s*"?([\w-]+)/) || [])[1]; const price = Number((qt.match(/"?(?:price|credits)"?\s*[:=]\s*(\d+)/i) || [])[1] || 0);
+  const qt = text(q); let qj = {}; try { qj = JSON.parse(qt); } catch {}
+  const quote = qj?.quote?.quoteId || (qt.match(/"?quote_?[iI]d"?\s*[:=]\s*"?([\w-]+)/) || [])[1];
+  const price = Number(qj?.quote?.credits ?? qj?.panel?.creditCost ?? 0);
   if (q.isError || !quote) { log({ ev: "quote_failed", i, text: qt.slice(0, 500), limit_like: LIMIT.test(qt) }); break; }
   if (price > 0) { log({ ev: "stop", i, why: `this still would cost ${price} credits (cap is 0)` }); break; }
   const g = await call("flow_generate", { prompt, mode: "image", aspect: "16:9", variants: 1, confirm: true, quote_id: quote });
@@ -45,7 +47,12 @@ for (let i = 0; i < count; i++) {
   done++;
   const w = await call("flow_wait", { expected_total: done, timeout_minutes: 10 });
   const wt = text(w);
-  log({ ev: "still", i, secs: Math.round((Date.now() - t0) / 1000), ok: !w.isError, wait: wt.slice(0, 200), limit_like: LIMIT.test(gt + " " + wt) });
+  let saved = "";
+  if (!w.isError) {   // standard quality download is free: the still lands in FLOW_MCP_OUTPUT_DIR
+    const d = await call("flow_download", { index: done - 1, quality: "standard", file_name: `still_${String(i).padStart(3, "0")}` });
+    saved = text(d).slice(0, 200);
+  }
+  log({ ev: "still", i, secs: Math.round((Date.now() - t0) / 1000), ok: !w.isError, wait: wt.slice(0, 120), saved, limit_like: LIMIT.test(gt + " " + wt) });
   if (w.isError || LIMIT.test(gt + " " + wt)) { log({ ev: "stop", i, why: "Flow refused or looked rate-limited" }); break; }
   if (i < count - 1) await new Promise((res) => setTimeout(res, gap * 1000));
 }
