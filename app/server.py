@@ -742,7 +742,7 @@ if __name__ == "__main__":
     # VS_RELOAD=1: restart automatically when a .py file changes (development only - it also stops a running render;
     # the job is then marked stopped and Resume continues it)
     reload = os.environ.get("VS_RELOAD") == "1"
-    if not reload or os.environ.get("WERKZEUG_RUN_MAIN"):   # owner, 2026-11-09: finished videos not yet in Google Photos go up now
+    if port == 42020 and (not reload or os.environ.get("WERKZEUG_RUN_MAIN")):   # owner, 2026-11-09: finished videos not yet in Google Photos go up now
         try:
             from studio import cloud_backup
             n = cloud_backup.sweep(config.load()["jobs_dir"])

@@ -208,7 +208,7 @@ def _extract(job, req, dest, meta, log):
                  "-c:v", "libx264", "-crf", 20, "-pix_fmt", "yuv420p", dest, timeout=120)
         total = inspect_video(local)["duration"] if source == local else float(inspect_video(source).get("duration") or 0)
         start0 = start
-        try: start = _best_framed(source, start, duration, dest, total, req, log)
+        try: start = start if own(job) else _best_framed(source, start, duration, dest, total, req, log)
         except ValueError:
             if source != local: source.unlink(missing_ok=True)
             raise
