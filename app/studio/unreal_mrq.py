@@ -28,8 +28,8 @@ def render_beat(spec: dict[str, Any], out_mp4: Path, cfg: Optional[dict[str, Any
     emit = log or (lambda _m: None)
     ue_cmd = find_unreal(cfg)
     if not ue_cmd:
-        emit("unreal_mrq: UnrealEditor-Cmd.exe not installed; skipping UE5 rung")
-        return None
+        emit("unreal_mrq: UE5 not installed; falling back to Blender 5.2.3 template rung")
+        from . import blender_templates; return blender_templates.render_beat(spec, out_mp4, cfg=cfg, log=log, timeout_s=min(timeout_s, 300))
     if not UE_PROJECT.exists() or not MRQ_SCRIPT.exists():
         emit("unreal_mrq: ue_studio project or mrq_render.py missing; skipping")
         return None
