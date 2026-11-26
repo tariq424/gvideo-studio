@@ -611,9 +611,10 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
     try: j = parse_json(_vision(cfg, img, prompt))
     except Exception as e:
         if subject: return False, f"vision check unavailable ({str(e)[:60]}); subject can't be confirmed", c["desc"]
-        log(f"  vision check unavailable ({str(e)[:80]}); accepting {c['id']}"); return True, "", c["desc"]
+        if cfg.get("stock_fail_closed", True): return False, f"vision check unavailable ({str(e)[:60]}); failing closed", c["desc"]
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     seen = str(j.get("seen") or c["desc"])[:160]
+    if not subject and cfg.get("stock_ban_people", True) and re.search(r"\b(person|people|man|woman|men|women|face|faces|portrait|worker|workers|employee|businessman|businesswoman|smiling|talking|interview|presenter|human|crowd|colleague|meeting)\b", seen + " " + str(c.get("desc", "")), re.I): return False, "stock footage with people/faces banned", seen
     if v2:
         ok, why = contra_verdict(cfg, j, mv, place, neutral, log, narration=narration or c.get("query", ""), story=story)
         if not ok: return False, why, seen
