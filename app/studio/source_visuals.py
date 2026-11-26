@@ -282,7 +282,7 @@ def make(cfg, job, workspace, sec, log):
     if own(job) and not cfg.get("_own_footage"): cfg = dict(cfg, _own_footage=True)
     req = _request(sec, max_s=clip_secs(cfg))
     if not req and cfg.get("source_clips_auto", True):
-        req = auto_request(job, sec, secs=clip_secs(cfg))
+        req = auto_request(job, sec, min_overlap=2 if own(job) else 3, secs=clip_secs(cfg))
         if req:
             log(f"  {sec.get('id', 'beat')}: source clip rung: cue at {req['start']:.1f}s matches the narration ({req['match']} shared words)")
     if not req:

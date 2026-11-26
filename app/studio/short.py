@@ -548,7 +548,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         n = needs[s["id"]]; items = []; rej = []
         from . import source_visuals
         raw_source = _safe(log, f"{s['id']} source clip", lambda: source_visuals.make(cfg, job, sd, s, log))
-        if raw_source and raw_source.get("type") == "video" and cfg.get("skip_faceless_source", True):
+        if raw_source and raw_source.get("type") == "video" and (cfg.get("skip_faceless_source", True) and not source_visuals.own(job)):
             # owner, 2026-11-17: a source clip of hands and torsos with no face in it (a tight two-shot) is a hand on black in a
             # tall frame; the beat gets a picture from the next rung instead (or its stock back)
             from . import reframe

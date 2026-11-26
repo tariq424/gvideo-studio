@@ -171,7 +171,7 @@ def process(cfg, job_dir, log=None):
     say = _log_to(job_dir, log)
     if not cfg.get("youtube_main_on", True): return True
     vids = dict(outputs(job_dir))
-    if "long" not in vids:
+    if "long" not in vids and not (cfg.get("youtube_main_allow_short_only", True) and "short" in vids):
         if vids: say("only a Short was made; nothing saved (a Short needs its video to link to)")
         return True
     job, channel = Path(job_dir).name, str(cfg.get("youtube_main_channel") or "tariqhasnain")
