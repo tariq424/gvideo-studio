@@ -817,14 +817,21 @@ def _render(job, comp, props, out, cfg, log, frames=None, scale=1.0, audio=True)
     rdir, bundle = review._bundle(log); out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
     pf = out.with_name(out.stem + "_props.json"); pf.write_text(json.dumps(props), encoding="utf-8")
     cmd = [short._npx(), "remotion", "render", str(bundle), comp, str(out), f"--props={pf}", f"--gl={short._gl(cfg)}", f"--scale={scale}",
-           "--log=error", *short.render_flags(cfg), "--crf=12" if scale >= 1 else "--crf=24"]
+           "--log=error", *short.render_flags(cfg), "--crf=12" if scale >= 1 else "--crf=24", *short.render_browser_args(cfg, log)]
     if frames: cmd.append(f"--frames={frames[0]}-{frames[1]}")
     if not audio: cmd.append("--muted")
     p = None
-    for attempt in range(3):
+    switched = False
+    for attempt in range(4):
         p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+        blob = p.stdout + p.stderr
         if p.returncode == 0 and out.exists(): break
-        if short.BROWSER_FLAKE not in (p.stdout + p.stderr): break
+        if not switched and any("chrome-headless-shell" in a for a in cmd):
+            switched = True
+            cmd = short.pin_installed_chrome(cmd, cfg)
+            log("  the render failed in Remotion's headless Chrome; trying again with the installed Chrome")
+            continue
+        if short.BROWSER_FLAKE not in blob: break
         time.sleep(5)
     pf.unlink(missing_ok=True)
     if p.returncode != 0 or not out.exists():

@@ -1292,10 +1292,18 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     pf = out.with_suffix(".json"); pf.write_text(json.dumps({"g": g, "secs": secs, "w": size[0], "h": size[1]}), encoding="utf-8")
     tmp = out.with_name(out.stem + "_tmp.mp4")
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Recon", str(tmp), f"--props={pf}", f"--gl={_gl(cfg)}",
-           *render_flags(cfg), "--jpeg-quality=92", "--crf=18", "--log=error"]
-    for attempt in range(3):
+           *render_flags(cfg), "--jpeg-quality=92", "--crf=18", "--log=error", *render_browser_args(cfg, log)]
+    on_shell = any("chrome-headless-shell" in a for a in cmd)
+    for attempt in range(4):
         p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
-        if p.returncode == 0 or BROWSER_FLAKE not in (p.stdout + p.stderr) or attempt == 2: break
+        blob = p.stdout + p.stderr
+        if p.returncode == 0 and tmp.exists(): break
+        if on_shell and (BROWSER_FLAKE in blob or attempt >= 1):
+            on_shell = False
+            cmd = pin_installed_chrome(cmd, cfg)
+            log("  the render failed in Remotion's headless Chrome; trying again with the installed Chrome")
+            continue
+        if BROWSER_FLAKE not in blob or attempt == 3: break
         time.sleep(10)
     if p.returncode != 0 or not tmp.exists():
         raise RuntimeError(" / ".join((p.stdout + p.stderr).strip().splitlines()[-4:])[:300])
@@ -1330,31 +1338,82 @@ def headless_shell(log=print):
     return find()
 
 
+def _installed_chrome_candidates():
+    """Windows Chrome, then a Linux/macOS binary on PATH. Drive-letter paths are not split."""
+    env = os.environ.get("CHROME_PATH") or os.environ.get("REMOTION_BROWSER_EXECUTABLE") or ""
+    cands = [Path(env)] if env else []
+    if os.name == "nt":
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        local = os.environ.get("LOCALAPPDATA", "")
+        cands += [Path(pf) / "Google/Chrome/Application/chrome.exe",
+                  Path(pf86) / "Google/Chrome/Application/chrome.exe",
+                  Path(local) / "Google/Chrome/Application/chrome.exe"]
+    else:
+        for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
+            found = shutil.which(name)
+            if found: cands.append(Path(found))
+        cands += [Path("/usr/bin/google-chrome"), Path("/usr/bin/google-chrome-stable"), Path("/usr/bin/chromium")]
+    seen = []
+    for path in cands:
+        try:
+            if path.is_file() and path not in seen: seen.append(path)
+        except OSError:
+            continue
+    return seen
+
+
+def _flags_for_browser(path):
+    """Pin the executable. Installed Chrome must use chrome-for-testing so Remotion passes --headless=new.
+    The default chrome mode (headless-shell) passes --headless=old; Chrome 128+ starts, paints a few frames, then exits.
+    Remotion already adds --no-sandbox itself."""
+    flags = [f"--browser-executable={path}"]
+    if "chrome-headless-shell" not in Path(path).name.lower():
+        flags.append("--chrome-mode=chrome-for-testing")
+    return flags
+
+
 def chrome_browser_args(cfg):
     """The installed Chrome (the fallback, and what renders when the headless shell is off or missing)."""
-    candidates = [
-        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe"] if os.name == "nt" else []
-    for path in candidates:
-        if path.is_file(): return [f"--browser-executable={path}"]
-    return []
+    explicit = (cfg or {}).get("remotion_browser_executable")
+    if explicit:
+        path = Path(explicit)
+        if path.is_file() and "chrome-headless-shell" not in path.name.lower():
+            return _flags_for_browser(path)
+    found = _installed_chrome_candidates()
+    return _flags_for_browser(found[0]) if found else []
+
+
+def pin_installed_chrome(cmd, cfg):
+    """Swap a failed headless-shell pin for the installed Chrome, with the GPU off unless remotion_gl is set.
+    --gl=swangle is the software GL path (the supported stand-in for --disable-gpu)."""
+    flags = chrome_browser_args(cfg)
+    if not flags: return list(cmd)
+    cmd = [a for a in cmd if not a.startswith("--browser-executable=") and not a.startswith("--chrome-mode=")]
+    if not (cfg or {}).get("remotion_gl"):
+        cmd = ["--gl=swangle" if a.startswith("--gl=") else a for a in cmd]
+        if not any(a.startswith("--gl=") for a in cmd): cmd.append("--gl=swangle")
+    return cmd + flags
+
+
+def _chrome_died(tail):
+    """The browser connected and then quit (G051: frame 57 of 792) rather than failing before the first frame."""
+    blob = "\n".join(tail)
+    if re.search(r"Rendered\s+\d+\s*/", blob): return True
+    return bool(re.search(r"Target closed|Protocol error|browser has disconnected|GPU process|Aw, Snap", blob, re.I))
 
 
 def render_browser_args(cfg, log=print):
     """An explicit override, else Remotion's headless shell (fast), else the installed Chrome."""
     explicit = cfg.get("remotion_browser_executable")
-    if not explicit and cfg.get("remotion_headless_shell", True):
+    if explicit:
+        path = Path(explicit)
+        if not path.is_file(): raise RuntimeError(f"Configured Remotion browser not found: {explicit}")
+        return _flags_for_browser(path)
+    if cfg.get("remotion_headless_shell", True):
         hs = headless_shell(log)
         if hs: return [f"--browser-executable={hs}"]
-    candidates = [Path(explicit)] if explicit else [
-        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe"] if os.name == "nt" else []
-    for path in candidates:
-        if path.is_file(): return [f"--browser-executable={path}"]
-    if explicit: raise RuntimeError(f"Configured Remotion browser not found: {explicit}")
-    return []
+    return chrome_browser_args(cfg)
 
 
 def render_concurrency(cfg, log=None, job=None):
@@ -1417,7 +1476,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     timeline = job / "short" / "public" / "teaser.json"
     data = json.loads(timeline.read_text(encoding="utf-8"))
     videos = {b.get("src") for beat in data["beats"] for b in beat.get("bgs", []) if b.get("type") == "video"}
-    browser_retries, shell_retried = 0, False
+    browser_retries, shell_retried, gpu_retried = 0, False, False
     from . import camera_moves
     for attempt in range(2 * len(videos) + 3):
         if camera_moves.mode(cfg) == "framed":   # framed camera moves: the stills pre-rendered, passed as props (teaser.json unchanged)
@@ -1434,20 +1493,27 @@ def do_render(job, plan, cfg, meta, log, stop):
             if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")
         if p.wait() == 0: break
+        why = re.sub(r"\x1b\[[0-9;]*m", "", errline or (tail[-1] if tail else "no output"))[:200]
+        flake = any(BROWSER_FLAKE in l for l in tail)
         if on_shell:   # the headless shell failed: the installed Chrome (it decoded px7989667 when Remotion's default didn't) first,
-            # before any clip is swapped for a card. A failure that isn't about video (Nov 8: bundling died at 6% while RAM was
-            # short) gets one more try in the fast headless shell first; switching browsers can't fix it and halves the speed.
-            why = re.sub(r"\x1b\[[0-9;]*m", "", errline or (tail[-1] if tail else "no output"))[:200]
+            # before any clip is swapped for a card. A connect timeout switches immediately (the shell never opened a port).
+            # Any other non-video failure (Nov 8: bundling died at 6% while RAM was short) gets one more try in the fast shell.
             media_err = any(re.search(r"VS-MEDIA-ERROR|extract|decod|compositor|OffthreadVideo|frame", l, re.I) for l in tail)
-            if not media_err and not shell_retried:
+            if flake or media_err or shell_retried:
+                on_shell = False
+                pinned = pin_installed_chrome(cmd, cfg)
+                if pinned != cmd:
+                    cmd = pinned
+                    log(f"  the render failed in Remotion's headless Chrome ({why}); trying again with the installed Chrome")
+                    continue
+            else:
                 shell_retried = True
                 log(f"  the render failed in Remotion's headless Chrome ({why}); trying it once more"); time.sleep(10); continue
-            on_shell = False
-            ch = chrome_browser_args(cfg)
-            if ch:
-                cmd = [a for a in cmd if not a.startswith("--browser-executable=")] + ch
-                log(f"  the render failed in Remotion's headless Chrome ({why}); trying again with the installed Chrome"); continue
-        if browser_retries < 2 and any(BROWSER_FLAKE in l for l in tail):
+        if not gpu_retried and _chrome_died(tail) and any(a.startswith("--gl=") and a != "--gl=swangle" for a in cmd):
+            gpu_retried = True
+            cmd = ["--gl=swangle" if a.startswith("--gl=") else a for a in cmd]
+            log("  installed Chrome died mid-render; retrying with software GL (--gl=swangle, GPU off)"); continue
+        if browser_retries < 2 and flake:
             # headless Chrome sometimes starts slowly (busy GPU/disk); Remotion gives it 25 s - just start again
             browser_retries += 1
             log(f"  Remotion couldn't connect to its browser in time; retrying the render ({browser_retries + 1} of 3)"); time.sleep(10); continue

@@ -144,6 +144,15 @@ def test_headless_shell_first_installed_chrome_fallback(monkeypatch, tmp_path):
     assert "chrome-headless-shell" not in "".join(short.render_browser_args({"remotion_headless_shell": False}, lambda *_: None))
     src = (Path(__file__).parents[1] / "app" / "studio" / "short.py").read_text(encoding="utf-8")
     assert "trying again with the installed Chrome" in src   # a failed shell render retries in Chrome before any clip becomes a card
+    browser = tmp_path / "chrome.exe"
+    browser.write_text("", encoding="utf-8")
+    monkeypatch.setattr(short, "_installed_chrome_candidates", lambda: [browser])
+    flags = short.chrome_browser_args({})
+    assert flags == [f"--browser-executable={browser}", "--chrome-mode=chrome-for-testing"]
+    pinned = short.pin_installed_chrome(["npx", "remotion", "render", "--gl=angle", "--browser-executable=/tmp/chrome-headless-shell"], {})
+    assert "--gl=swangle" in pinned and "--chrome-mode=chrome-for-testing" in pinned
+    assert not any("chrome-headless-shell" in a for a in pinned)
+    assert short._chrome_died(["Rendered 57/792"]) and not short._chrome_died(["Timed out after 25000 ms while trying to connect to the browser!"])
 
 
 def test_first_name_alone_counts_when_unique():

@@ -35,7 +35,7 @@ class StockValidationTests(unittest.TestCase):
  def test_browser_override(self):
   with tempfile.TemporaryDirectory() as d:
    browser=Path(d)/'chrome.exe';browser.touch()
-   self.assertEqual(short.render_browser_args({'remotion_browser_executable':str(browser)}),[f'--browser-executable={browser}'])
+   self.assertEqual(short.render_browser_args({'remotion_browser_executable':str(browser)}),[f'--browser-executable={browser}','--chrome-mode=chrome-for-testing'])
    with self.assertRaisesRegex(RuntimeError,'not found'):
     short.render_browser_args({'remotion_browser_executable':str(browser)+'missing'})
  def test_concurrency(self):
