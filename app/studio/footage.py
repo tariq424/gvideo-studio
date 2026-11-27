@@ -586,6 +586,29 @@ def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print, 
     return True, ""
 
 
+# A person word names the subject. The same words inside a scene description ("a man flying a kite",
+# a technician beside a rack) are incidental and are not read here.
+_PEOPLE_SUBJECT = re.compile(
+    r"\b(person|people|man|woman|men|women|face|faces|portrait|worker|workers|employee|"
+    r"businessman|businesswoman|smiling|talking|interview|presenter|human|crowd|colleague|meeting)\b",
+    re.I)
+
+
+def _about_person(text):
+    return bool(_PEOPLE_SUBJECT.search(str(text or "")))
+
+
+def _stock_people_banned(j, mainv):
+    """People ban follows the subject. Reject when the slot's kind is a person (its main, if it has no kind),
+    or when the vision check's kind_shown — the kind it says the clip actually shows — is a person.
+    `seen` and the library tags are the whole scene, so a hand on a rack or the man holding the kite string
+    does not count. stand_in stays in contra_verdict and is not decided here."""
+    mv = mainv or {}
+    kind = str(mv.get("kind") or "").strip()
+    if _about_person(kind if kind else mv.get("main")): return True
+    return _about_person(j.get("kind_shown"))
+
+
 def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration="", guard=None, mainv=None, place="", neutral=False, story=""):
     """-> (ok, reason, seen). Generic slots: hard checks + no visible third-party brand.
     Subject-locked slots: the clip must positively match the subject (brand evidence and the vision model agreeing with a reference photo)."""
@@ -614,7 +637,8 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
         if cfg.get("stock_fail_closed", True): return False, f"vision check unavailable ({str(e)[:60]}); failing closed", c["desc"]
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     seen = str(j.get("seen") or c["desc"])[:160]
-    if not subject and cfg.get("stock_ban_people", True) and re.search(r"\b(person|people|man|woman|men|women|face|faces|portrait|worker|workers|employee|businessman|businesswoman|smiling|talking|interview|presenter|human|crowd|colleague|meeting)\b", seen + " " + str(c.get("desc", "")), re.I): return False, "stock footage with people/faces banned", seen
+    if not subject and cfg.get("stock_ban_people", True) and _stock_people_banned(j, mv):
+        return False, "stock footage with people/faces banned", seen
     if v2:
         ok, why = contra_verdict(cfg, j, mv, place, neutral, log, narration=narration or c.get("query", ""), story=story)
         if not ok: return False, why, seen
