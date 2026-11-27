@@ -102,8 +102,100 @@ def nasa(q, log, limit=6):
                     "desc": (d.get("title", "") + ". " + (d.get("description") or "")[:140]).strip(), "preview": prev.replace("http://", "https://")})
     return out
 
-def search_slot(queries, orient, text, log, want_long_side, cache):
-    """All candidates for one slot, interleaved across sources and queries. cache: dict persisted by the caller."""
+# A named person is never a stock query. Objects, places, and unknown people ("a surgeon", "a worker",
+# "a man flying a kite") still are. A stand-in is a person-only query while the narration names someone.
+_ROLE = set("""person people man men woman women face faces portrait worker workers employee businessman businesswoman
+presenter human crowd colleague politician official president minister senator governor mayor pilot captain spokesperson
+agent leader candidate celebrity surgeon doctor nurse student students prime""".split())
+_SEARCH_SKIP = set("""speaking talking smiling standing sitting walking running flying watching holding wearing looking
+waving podium lectern microphone mic suit suits tie ties stage interview closeup""".split())
+_PLACE_BIGRAM = {"new york", "los angeles", "san francisco", "san diego", "las vegas", "el paso", "new hampshire",
+                 "new zealand", "united states", "united kingdom", "hong kong", "tel aviv", "south africa", "saudi arabia",
+                 "abu dhabi", "kuala lumpur", "buenos aires", "des moines"}
+_TITLE_NAME = re.compile(
+    r"\b(?:Prime Minister|Vice President|President|Senator|Governor|Mayor|Captain|General|Professor|Doctor|Dr\.?|Minister|Secretary)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)")
+
+
+def _role_word(w):
+    return w.lower() in _ROLE or bool(_PEOPLE_SUBJECT.fullmatch(w))
+
+
+def _named_person(subject):
+    """A locked subject that is a real named person, not a generic role ("a surgeon", "a worker")."""
+    if not isinstance(subject, dict) or not str(subject.get("name") or "").strip(): return False
+    if subject.get("kind") not in (None, "", "person"): return False
+    words = [w for w in re.findall(r"[a-z]+", subject["name"].lower()) if len(w) > 2 and w not in GENERIC]
+    if subject.get("kind") != "person" and not _TITLE_NAME.search(subject["name"]) and not re.search(r"[A-Z][a-z]+\s+[A-Z][a-z]+", subject["name"]):
+        return False
+    return not words or not all(_role_word(w) for w in words)
+
+
+def _people_from_prose(text):
+    """Names written into a query or a narration line: "Prime Minister Hale", "Donald Trump". Places stay places."""
+    names = [m.group(0) for m in _TITLE_NAME.finditer(text or "")]
+    for m in re.finditer(r"\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b", text or ""):
+        phrase = f"{m.group(1)} {m.group(2)}"
+        if phrase.lower() in _PLACE_BIGRAM or _role_word(m.group(1)) and _role_word(m.group(2)): continue
+        if _role_word(m.group(2)): continue
+        names.append(phrase)
+    return names
+
+
+def _mentions_person(text, names):
+    from . import people
+    ents = [{"kind": "person", "name": n} for n in names if str(n).strip()]
+    return bool(ents and people.names(text, ents))
+
+
+def _object_query(q):
+    """A kite, a server rack, a folder, a skyline. A person word beside that thing is incidental."""
+    words = [w for w in re.findall(r"[a-z0-9]+", str(q).lower()) if len(w) > 2 and w not in GENERIC and w not in _SEARCH_SKIP]
+    return any(not _role_word(w) for w in words)
+
+
+def queries_for_stock(queries, text="", people=None):
+    """Queries that may be sent to a stock library. Drops a named person and a stand-in for one.
+    Keeps objects (even with a man in the phrase) and unknown people when the line names nobody."""
+    names = [str(n).strip() for n in (people or []) if str(n).strip()]
+    names += _people_from_prose(text)
+    for q in queries or []:
+        names += _people_from_prose(q)
+    named_line = _mentions_person(text, names) or any(_people_from_prose(text))
+    kept = []
+    for q in queries or []:
+        q = str(q or "").strip()
+        if not q: continue
+        if _mentions_person(q, names) or _people_from_prose(q): continue
+        if named_line and not _object_query(q) and (_role_word_in(q) or _about_person(q)): continue
+        kept.append(q)
+    return kept
+
+
+def _role_word_in(q):
+    return any(_role_word(w) for w in re.findall(r"[a-z0-9]+", str(q).lower()))
+
+
+def _named_people_near(path):
+    """Named people from the nearest entities.json (the story list). Objects in that file are not people."""
+    p = Path(path) if path else None
+    if p is None: return []
+    for d in [p, *list(p.parents)[:4]]:
+        f = d / "entities.json"
+        if not f.exists(): continue
+        try: ents = json.loads(f.read_text(encoding="utf-8"))
+        except Exception: return []
+        return [e.get("name") for e in ents if isinstance(e, dict) and e.get("kind") == "person" and e.get("name")]
+    return []
+
+
+def search_slot(queries, orient, text, log, want_long_side, cache, people=None):
+    """All candidates for one slot, interleaved across sources and queries. cache: dict persisted by the caller.
+    A named person, and a person-only query that would stand in for one, is not sent."""
+    raw = [str(q).strip() for q in (queries or []) if str(q or "").strip()]
+    queries = queries_for_stock(raw, text, people)
+    dropped = [q for q in raw if q not in queries]
+    if dropped: log("  stock search skipped named person: " + "; ".join(dropped)[:160])
+    if not queries: return []
     lists = []
     space = bool(SPACE.search(" ".join(queries) + " " + text))
     for i, q in enumerate(queries):
@@ -793,8 +885,17 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
         if stop(): raise RuntimeError("cancelled")
         qs = list(s["queries"])
         sj = s.get("subject") or {}
-        if sj.get("name") and not any(sj["name"].lower() in q.lower() for q in qs): qs = [sj["name"]] + qs   # locked: search the subject itself too
-        cands[s["id"]] = search_slot(qs[:3], orient, s["text"], log, want_long_side, st["cache"])
+        # a named person is not a stock query; an object subject (a plane, a car) still is
+        if sj.get("name") and not _named_person(sj) and not any(str(sj["name"]).lower() in q.lower() for q in qs):
+            qs = [sj["name"]] + qs
+        people = [str(x) for x in (s.get("people") or []) if str(x).strip()]
+        people += _named_people_near(out_dir)
+        if _named_person(sj): people.append(sj["name"])
+        text = s.get("narration") or s.get("text") or ""
+        kept = queries_for_stock(qs, text, people)
+        dropped = [str(q).strip() for q in qs if str(q).strip() and str(q).strip() not in kept]
+        if dropped: log(f"  {s['id']}: stock search skipped named person: " + "; ".join(dropped)[:140])
+        cands[s["id"]] = search_slot(kept[:3], orient, text, log, want_long_side, st["cache"], people=people)
     save()
     unranked = [s for s in todo if s["id"] not in st["ranked"]]
     if unranked:
