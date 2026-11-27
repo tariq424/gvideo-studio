@@ -208,7 +208,7 @@ def _extract(job, req, dest, meta, log):
                  "-c:v", "libx264", "-crf", 20, "-pix_fmt", "yuv420p", dest, timeout=120)
         total = inspect_video(local)["duration"] if source == local else float(inspect_video(source).get("duration") or 0)
         start0 = start
-        try: start = start if own(job) else _best_framed(source, start, duration, dest, total, req, log)
+        try: start = _best_own_frame(source, start, duration, dest, total, req, log) if own(job) else _best_framed(source, start, duration, dest, total, req, log)
         except ValueError:
             if source != local: source.unlink(missing_ok=True)
             raise
@@ -425,3 +425,55 @@ def snapshot(cfg, job, workspace, sec, log, source_item=None):
         return None
     log(f"  {bid}: source screenshot for the image generators: {origin}")
     return {"path": str(still), "from": origin}
+
+def _frame_content_score(img_path):
+    from PIL import Image, ImageStat
+    with Image.open(img_path) as im:
+        rgb = im.convert("RGB").resize((160, 90))
+        hsv = rgb.convert("HSV")
+        px = list(rgb.getdata())
+        wf = sum(1 for r, g, b in px if r > 225 and g > 225 and b > 225) / max(1, len(px))
+        sat = ImageStat.Stat(hsv).mean[1] / 255.0
+        var = sum(ImageStat.Stat(rgb).stddev) / (3.0 * 128.0)
+        return (sat * 1.4) + (var * 0.8) - (wf * 1.3)
+def _best_own_frame(local, start, duration, dest, total, req, log):
+    import tempfile
+    best_t, best_s = start, -9.0
+    with tempfile.TemporaryDirectory(prefix="gvs_own_") as td:
+        for off in (0.0, 1.5, 3.0, -1.5, 4.5):
+            t = max(0.0, min(max(0.0, total - duration), start + off))
+            f = Path(td) / ("f_" + str(int(t * 10)) + ".jpg")
+            try:
+                media.ff("-ss", t + 0.4, "-i", local, "-frames:v", 1, "-q:v", 5, "-an", f, timeout=30)
+                sc = _frame_content_score(f)
+                if sc > best_s: best_s, best_t = sc, t
+            except Exception: pass
+    if abs(best_t - start) >= 0.4:
+        media.ff("-ss", best_t, "-i", local, "-t", duration, "-an", "-vf", "fps=30,scale=960:-2", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", dest, timeout=120)
+        log(f"  own_footage frame-score: nudged {start:.1f}s -> {best_t:.1f}s (score={best_s:.2f})")
+    return best_t
+def make_many(cfg, job, sd, beat, log, count=3, used_starts=None):
+    used = list(used_starts or [])
+    out = []
+    if not own(job) or count <= 0: return out
+    cues_f = job / "src" / "source_cues.json"
+    cues = json.loads(cues_f.read_text(encoding="utf-8")) if cues_f.exists() else []
+    vo_words = set(re.findall(r"[a-z0-9]{4,}", (beat.get("vo") or "").lower()))
+    scored = []
+    for c in cues:
+        st = float(c.get("start") or 0)
+        cw = set(re.findall(r"[a-z0-9]{4,}", (c.get("text") or "").lower()))
+        scored.append((len(vo_words & cw), st, c.get("text") or ""))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    bid = beat.get("id", "b")
+    for _, st, txt in scored:
+        if len(out) >= count: break
+        if any(abs(st - u) < 3.5 for u in used): continue
+        b2 = dict(beat)
+        b2["id"] = bid + "_s" + str(len(out) + 2)
+        b2["source_visual"] = {"kind": "clip", "start": st, "duration": 2.5, "purpose": txt[:90]}
+        try:
+            it = make(cfg, job, sd, b2, log)
+            if it: out.append(it); used.append(float(it.get("timestamp") or st))
+        except Exception as e: log(f"  own_footage extra slot at {st:.1f}s skipped: {str(e)[:80]}")
+    return out

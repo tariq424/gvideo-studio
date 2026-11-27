@@ -1,3 +1,4 @@
+from . import rungs
 """The visual ladder for Short beats that stock footage / real photos didn't cover (step 1 runs in short_stock / photos):
   2a. Cloud still (Gemini, then ChatGPT; cloudgen.py) -> coherence check; skipped for beats naming a real person
   2b. WanGP still (from the beat's still_prompt) - only when 2a gave nothing usable -> coherence check

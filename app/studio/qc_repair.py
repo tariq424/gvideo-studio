@@ -1,3 +1,4 @@
+from .rungs import SHARED_RUNG_NAMES
 """QC repair-by-ladder (owner spec approved 2026-10-26, exchange doc MSG 007, plus Tariq's addition the same evening).
 
 qc.py (Koda's code, never edited here) only emits the MARKERS: run in report mode, its would_fix spans are the confirmed,

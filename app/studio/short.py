@@ -1,3 +1,4 @@
+from . import rungs
 """Vertical YouTube Short (2-3 min): script -> stock footage (Pexels, auto-vetted) -> narration -> Remotion render.
 Almost no GPU: only the narration (WanGP TTS) and the clip vetting (small vision model) touch the GPU."""
 import base64, io, json, math, os, re, shutil, subprocess, time
@@ -559,6 +560,12 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if raw_source:
             source = dict(raw_source); source["src"] = _rel_sd(source.pop("path"), sd)
             items.append(source)
+            if source_visuals.own(job) and len(items) < n:
+                used_ts = [float(source.get("timestamp") or 0.0)]
+                sid = s["id"]
+                extras = _safe(log, sid + " own_footage extra slots", lambda: source_visuals.make_many(cfg, job, sd, s, log, count=n-len(items), used_starts=used_ts), []) or []
+                for ex in extras:
+                    ex2 = dict(ex); ex2["src"] = _rel_sd(ex2.pop("path"), sd); items.append(ex2)
         elif s["id"] in demoted:   # the source clip failed: the beat gets back the stock set aside for it
             pick[s["id"]] = demoted.pop(s["id"])
             (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
@@ -615,13 +622,18 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                                   "rung": "imagegen", "site": imagegen.last_site(), "described": bool(snap), "variant": k})
                 else:
                     items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": imagegen.last_site(), "variant": k})
-        if v2 and cfg.get("blender_on", True) and s.get("subject") and not items:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)
+        if v2 and cfg.get("blender_on", True) and len(items) < n:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)
             from . import mediaroutes
             clip = _safe(log, "blender", lambda: mediaroutes.blender_rung(cfg, sd, s, f"{s['id']}_blender", log, aspect="9:16"))
+            if not clip:
+                from . import blender_templates as _bt
+                _tspec = {"template": "T_DataWall", "title": (s.get("vo") or "")[:40], "subtitle": s.get("id", ""), "width": 540, "height": 960, "fps": 24, "duration_s": 2.5}
+                clip = _safe(log, "blender_templates", lambda: _bt.render_beat(_tspec, sd / "blender" / (s["id"] + "_tpl.mp4"), cfg=cfg, log=log))
+            if not clip: log("  " + s["id"] + ": blender rung skipped (no scene or template output)")
             if clip:
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
                               "tag": "GENERATED · BLENDER", "rung": "blender"})
-        if v2 and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)) and not items:   # rung 5: Meta video (free) -> Flow (paid): only a beat nothing else could fill
+        if v2 and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)) and len(items) < n:   # rung 5: Meta video (free) -> Flow (paid): only a beat nothing else could fill
             from . import mediaroutes
             clip, vtag, vrung = _safe(log, "AI video", lambda: mediaroutes.video_rung(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16")) or (None, None, None)
             if clip:
