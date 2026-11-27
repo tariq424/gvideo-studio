@@ -1,6 +1,6 @@
 """Single shared visual rung registry for Shorts, explainers, interviews, and QC repair."""
 SHARED_RUNG_NAMES = (
-    "stock", "meta_chain", "ai_image", "chatgpt_chain", "blender", "video",
+    "stock", "meta_chain", "ai_image", "chatgpt_chain", "unreal", "blender", "video",
     "cloud", "marble", "local_i2v_own_frame", "wangp", "static_image",
     "studio3d", "physics", "motion", "hyperframes", "threejs", "card",
 )

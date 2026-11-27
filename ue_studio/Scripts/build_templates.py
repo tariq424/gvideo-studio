@@ -7,12 +7,19 @@ TEMPLATES = [
     ("/Game/Templates/T_ProofScreen", "3D Proof Screen"),
 ]
 
+# UE 5.8: one call. new_level() and a second copy left the map on the editor default rotation.
+ENGINE_TEMPLATE = "/Engine/Maps/Templates/Template_Default"
+
 def create_starter_level(asset_path: str, label: str) -> None:
     if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
         unreal.log(f"[GVideoStudio] Template already exists: {asset_path}")
         return
     subsys = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
-    subsys.new_level(asset_path)
+    made = False
+    if hasattr(subsys, "new_level_from_template"):
+        made = bool(subsys.new_level_from_template(asset_path, ENGINE_TEMPLATE))
+    if not made:
+        subsys.new_level(asset_path)
     cam = unreal.EditorLevelLibrary.spawn_actor_from_class(
         unreal.CineCameraActor, unreal.Vector(-420.0, 0.0, 140.0), unreal.Rotator(0.0, 0.0, 0.0)
     )

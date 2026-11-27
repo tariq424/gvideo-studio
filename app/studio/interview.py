@@ -1590,7 +1590,7 @@ Reply with JSON only: {{"bad": [second numbers], "why": "a few words"}}"""
         rungs = self.cfg.get("interview_rungs")
         # owner, 2026-11-12: the same picture rungs as explainers and Shorts ("for the interviews too, I want to keep the same
         # rungs"): Meta chain, AI image (Gemini too), ChatGPT chain, Blender, Meta video -> Flow, cloud still, WanGP, held still
-        rungs = tuple(("meta_chain", "ai_image", "chatgpt_chain", "blender", "video", "cloud", "wangp", "static_image")
+        rungs = tuple(("meta_chain", "ai_image", "chatgpt_chain", "unreal", "blender", "video", "cloud", "wangp", "static_image")
                       if rungs is None else rungs)
         for r in rungs:   # Nov 10: an invented man in an apron got through - AI pictures are checked like found ones
             got = self._rungs(text, visual, d, out, (r,))

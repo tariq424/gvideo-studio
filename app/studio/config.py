@@ -54,6 +54,8 @@ DEFAULTS = {
     "meta_video_max_per_video": 3,    # Meta video clips per output
     "meta_video_on": True,            # rung 5a: meta.ai video (free) for a beat nothing above filled, before Flow
     "flow_via_routes": True,          # rung 5b: Flow through the proven route (flow.google.com) instead of flow.py (old labs.google URL)
+    "unreal_on": True,                # rung immediately ahead of Blender: UE 5.8 Movie Render Queue (shared RUNGS registry)
+    "ue_install_roots": "",           # extra editor search roots (';'-separated). Env UE_INSTALL_ROOTS is read too. D:\Epic Games is built in.
     "blender_on": True,               # rung 3b: Blender scene (MCP) for a subject-locked beat the image services missed; complete scenes only
     "blender_quality": "preview",
     "imagegen_rotate": False,

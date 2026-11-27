@@ -1,4 +1,4 @@
-from .rungs import SHARED_RUNG_NAMES
+from .rungs import build_registry
 """QC repair-by-ladder (owner spec approved 2026-10-26, exchange doc MSG 007, plus Tariq's addition the same evening).
 
 qc.py (Koda's code, never edited here) only emits the MARKERS: run in report mode, its would_fix spans are the confirmed,
@@ -353,6 +353,18 @@ def _rung_metachain(ctx):
     return None, None, "Meta chain made nothing"
 
 
+def _rung_unreal(ctx):
+    """Shared-registry rung immediately ahead of Blender. A miss returns None; Blender is the next rung, not an internal fallback."""
+    if not ctx["vo"]: return None, None, "no narration for the span"
+    if not ctx["cfg"].get("unreal_on", True): return None, None, "unreal off"
+    from . import unreal_mrq
+    spec = {"template": "T_DataWall", "title": (ctx["vo"] or "")[:40], "subtitle": ctx["key"],
+            "width": ctx["W"], "height": ctx["H"], "fps": 30, "duration_s": float(ctx["need"] or 2.5), "job_name": ctx["key"]}
+    out = ctx["work"] / f"{ctx['key']}_unreal.mp4"
+    clip = unreal_mrq.render_beat(spec, out, cfg=ctx["cfg"], log=ctx["log"])
+    return _checked(ctx, clip, "Unreal MRQ") if clip else (None, None, "Unreal MRQ produced nothing")
+
+
 def _rung_blender(ctx):
     """Rung 3b: a complete Blender scene (Poly Haven assets, Cycles on the GPU)."""
     if not ctx["vo"]: return None, None, "no narration for the span"
@@ -458,10 +470,14 @@ def _rung_threejs(ctx):
     return _checked(ctx, clip, why) if clip else (None, None, why)
 
 
-RUNGS = [("stock", _rung_stock), ("meta_chain", _rung_metachain), ("ai_image", _rung_aiimage), ("chatgpt_chain", _rung_chatgpt),
-         ("blender", _rung_blender), ("video", _rung_video), ("cloud", _rung_cloud), ("marble", _rung_marble),
-         ("local_i2v_own_frame", _rung_ownframe), ("wangp", _rung_wangp), ("static_image", _rung_static),
-         ("studio3d", _rung_studio3d), ("physics", _rung_physics), ("motion", _rung_motion), ("hyperframes", _rung_hyperframes), ("threejs", _rung_threejs), ("card", _rung_card)]   # threejs: 2026-11-21   # 3D studio, then drawings (physics, motion, HyperFrames), then the card (owner, 2026-11-12/13/18)
+# One ladder. Order is SHARED_RUNG_NAMES (unreal immediately ahead of blender). Do not keep a second list.
+RUNGS = build_registry({
+    "stock": _rung_stock, "meta_chain": _rung_metachain, "ai_image": _rung_aiimage, "chatgpt_chain": _rung_chatgpt,
+    "unreal": _rung_unreal, "blender": _rung_blender, "video": _rung_video, "cloud": _rung_cloud, "marble": _rung_marble,
+    "local_i2v_own_frame": _rung_ownframe, "wangp": _rung_wangp, "static_image": _rung_static,
+    "studio3d": _rung_studio3d, "physics": _rung_physics, "motion": _rung_motion, "hyperframes": _rung_hyperframes,
+    "threejs": _rung_threejs, "card": _rung_card,
+})
 
 
 # ------------------------------------------------------------------ splice
@@ -582,7 +598,7 @@ def repair(mp4, cfg, job_dir, log=print, stop=lambda: False, vert=False, narrati
 
 
 def ladder_clip(cfg, text, visual, secs, kind, work, job_dir, src=None, log=print,
-                rungs=("stock", "meta_chain", "ai_image", "chatgpt_chain", "blender", "video", "cloud", "marble", "local_i2v_own_frame",
+                rungs=("stock", "meta_chain", "ai_image", "chatgpt_chain", "unreal", "blender", "video", "cloud", "marble", "local_i2v_own_frame",
                        "wangp", "static_image", "studio3d", "physics", "motion", "hyperframes")):
     """The repair ladder for a picture that isn't replacing a fault (owner, 2026-10-27: an interview fact's outside media goes
     through the rungs as a QC proof of concept). -> (clip, rung) or (None, ""). Each rung once; every candidate frame-checked;

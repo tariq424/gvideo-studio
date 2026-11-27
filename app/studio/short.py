@@ -622,6 +622,14 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                                   "rung": "imagegen", "site": imagegen.last_site(), "described": bool(snap), "variant": k})
                 else:
                     items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": imagegen.last_site(), "variant": k})
+        if v2 and cfg.get("unreal_on", True) and len(items) < n and rungs.SHARED_RUNG_NAMES.index("unreal") < rungs.SHARED_RUNG_NAMES.index("blender"):
+            from . import unreal_mrq
+            _uspec = {"template": "T_DataWall", "title": (s.get("vo") or "")[:40], "subtitle": s.get("id", ""),
+                      "width": 1080, "height": 1920, "fps": 30, "duration_s": 2.5}
+            clip = _safe(log, "unreal", lambda: unreal_mrq.render_beat(_uspec, sd / "unreal" / (s["id"] + "_mrq.mp4"), cfg=cfg, log=log))
+            if clip:
+                items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
+                              "tag": "GENERATED · UNREAL", "rung": "unreal"})
         if v2 and cfg.get("blender_on", True) and len(items) < n:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)
             from . import mediaroutes
             clip = _safe(log, "blender", lambda: mediaroutes.blender_rung(cfg, sd, s, f"{s['id']}_blender", log, aspect="9:16"))
@@ -708,6 +716,8 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 lines.append("Meta video clip")
             elif item.get("rung") == "meta chain":
                 lines.append("snapshot described, Meta image animated")
+            elif item.get("rung") == "unreal":
+                lines.append("Unreal MRQ")
             elif item.get("rung") == "blender":
                 lines.append("Blender scene (MCP)")
         vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": "", "f": False}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
