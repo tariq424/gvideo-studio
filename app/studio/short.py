@@ -423,9 +423,12 @@ def is_commentary(sec):
     vo = str(sec.get("vo") or "")
     purpose = str((sec.get("source_visual") or {}).get("purpose") or "")
     blob = f"{vo}\n{purpose}"
+    # commentary markers win even when the beat still points at a tool result on screen
+    if _COMMENTARY_RE.search(vo):
+        return True
     if _TOOL_TEST_RE.search(blob):
         return False
-    return bool(_COMMENTARY_RE.search(blob))
+    return False
 
 
 def do_stock(job, plan, cfg, log, stop):

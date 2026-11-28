@@ -46,12 +46,14 @@ def test_analyse_prefers_fit_frame_when_rendition_wider_than_crop(tmp_path):
 
 
 def test_is_commentary_detects_verdict_not_tool_test():
-    assert short.is_commentary({"vo": "So what is actually happening? Database or imagination?", "source_visual": {}})
+    assert short.is_commentary({"vo": "So what is actually happening? Either it searches some database, or imagines.", "source_visual": {}})
     assert short.is_commentary({"vo": "The host leaves the verdict to viewers: which tool did the right thing.",
                                 "source_visual": {"purpose": "Gemini on screen with the Trump likeness"}})
     assert not short.is_commentary({"vo": "Grok was the first test. It refused.",
                                     "source_visual": {"purpose": "Grok on screen showing the generated image of Trump"},
                                     "take": "Honestly, Grok's refusal is defensible."})
+    assert not short.is_commentary({"vo": "Someone fed AI tools a written description.", "take": "Our take: suspicious.",
+                                    "source_visual": {}})  # take alone is not commentary
     assert not short.is_commentary({"cta": True, "vo": "Follow for more."})
 
 
