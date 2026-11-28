@@ -232,11 +232,15 @@ def render_beat(spec: dict[str, Any], out_mp4: Path, cfg: Optional[dict[str, Any
             return None
         if proc.returncode != 0:
             emit(f"unreal_mrq: UE5 exited with code {proc.returncode}")
-            return None
-        pngs = sorted(frames_dir.glob("frame_*.png"))
+        pngs = sorted(p for p in frames_dir.rglob("*.png") if p.is_file())
         if not pngs:
+            tail = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip().splitlines()
+            if tail:
+                emit("unreal_mrq: " + " | ".join(tail[-4:])[:300])
             emit("unreal_mrq: no PNG frames produced")
             return None
+        if proc.returncode != 0:
+            emit(f"unreal_mrq: encoding {len(pngs)} frame(s) after editor exit {proc.returncode}")
         ref = spec.get("reference_png")
         if ref and Path(str(ref)).exists():
             for png in pngs:
@@ -244,7 +248,11 @@ def render_beat(spec: dict[str, Any], out_mp4: Path, cfg: Optional[dict[str, Any
                 upright_map(png, Path(str(ref)))
                 after = pixel_score(png, Path(str(ref)))
                 emit(f"unreal_mrq: pixel_score {png.name} {before:.3f} -> {after:.3f}")
-        ff = subprocess.run(["ffmpeg", "-y", "-framerate", str(fps), "-i", str(frames_dir / "frame_%04d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(out_mp4)], capture_output=True, text=True, timeout=180)
+        flat = tmp_dir / "flat"
+        flat.mkdir(exist_ok=True)
+        for i, png in enumerate(pngs):
+            (flat / f"frame_{i:04d}.png").write_bytes(png.read_bytes())
+        ff = subprocess.run(["ffmpeg", "-y", "-framerate", str(fps), "-i", str(flat / "frame_%04d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(out_mp4)], capture_output=True, text=True, timeout=180)
         if ff.returncode != 0 or not out_mp4.exists():
             emit("unreal_mrq: ffmpeg encode failed")
             return None

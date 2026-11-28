@@ -12,7 +12,7 @@ Three 5.8 fixes, ported from the video-studio-test working tree:
    tall frame so the map is not rotated 90 degrees. The host pixel check
    (unreal_mrq.pixel_score) scores that wrong render ~0 and a correct frame 0.98-0.995.
 """
-import json, os, unreal
+import json, os, time, unreal
 
 _KEEP = []
 
@@ -42,10 +42,10 @@ def open_level_from_template(template_path):
     """One call. Do not new_level() and then copy actors onto it."""
     subsys = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     leaf = template_path.rstrip("/").rsplit("/", 1)[-1]
-    dest = "/Game/Temp/GVS_" + leaf
+    # A fixed dest fails on the next beat: delete_asset drops the loaded world but the file is still there,
+    # and NewLevelFromTemplate then refuses ("an asset already exists").
+    dest = "/Game/Temp/GVS_%s_%d" % (leaf, int(time.time() * 1000))
     unreal.EditorAssetLibrary.make_directory("/Game/Temp")
-    if unreal.EditorAssetLibrary.does_asset_exist(dest):
-        unreal.EditorAssetLibrary.delete_asset(dest)
     ok = subsys.new_level_from_template(dest, template_path)
     if not ok:
         raise RuntimeError("new_level_from_template failed: %s -> %s" % (template_path, dest))
