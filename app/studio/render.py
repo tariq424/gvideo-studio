@@ -55,6 +55,11 @@ def do_voice(job, plan, cfg, wg, log, stop):
 
 
 def _do_voice_inner(job, plan, cfg, wg, log, stop):
+    from .writer import place_commentary_before_the_joke
+    moved = place_commentary_before_the_joke(plan)
+    if moved:
+        log(f"  research narration, then the beat, then the joke ({moved} section(s))")
+        (job / "plan.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
     d = job / "voice"; d.mkdir(exist_ok=True)
     gap = d / "_gap.wav"; media.ff("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", float(cfg.get("narration_gap_secs", 0.9)), gap)
     seed = 9000

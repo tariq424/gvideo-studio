@@ -6,6 +6,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from studio import flight_path, render_repair, unreal_mrq, writer  # noqa: E402
 
 
+def test_a_take_left_off_the_voice_is_spoken_before_the_beat():
+    plan = {"sections": [{"id": "b0", "vo": "The plane dropped toward Tabuk. A joke lands here.",
+                          "take": "Public track shows the plunge.", "punchline": "A joke lands here."}]}
+    assert writer.place_commentary_before_the_joke(plan) == 1
+    vo = plan["sections"][0]["vo"]
+    assert vo.index("Public track") < vo.index("The plane dropped") < vo.index("A joke lands here")
+    assert writer.place_commentary_before_the_joke(plan) == 0
+
+
 def test_commentary_comes_before_the_beat_and_the_joke_after():
     vo = writer.order_commentary_beat_joke(
         "The plane dropped. A joke lands here. More of the beat.",

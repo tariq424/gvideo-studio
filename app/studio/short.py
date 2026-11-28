@@ -348,6 +348,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             s["avoid"] = [] if s.get("subject") else avoid
             nl += bool(s.get("subject"))
         if nl: log(f"  {nl} beat(s) locked to a story subject")
+    from .writer import place_commentary_before_the_joke
+    moved = place_commentary_before_the_joke(plan)
+    if moved: log(f"  commentary before the beat, joke after ({moved} beat(s))")
     plan = verify_quotes(plan, transcript, log)
     w3 = budget(cfg, SHORT_MAX, len(plan["sections"]), wpm)[0]   # every narration word that still fits in 3:00, jokes included
     if not smoke and fit3(cfg, mode)[0]:   # the fact-check can lengthen the script: cut again (only when fitting 3:00 is on)
@@ -1131,7 +1134,15 @@ def _do_voice_inner(job, plan, cfg, wg, log, stop):
     between beats, using whisper word timings on the batch audio. Writes voice/<beat>.wav and timings.json."""
     import unicodedata
     from . import captions
+    from .writer import place_commentary_before_the_joke
     sd = job / "short"; vd = sd / "voice"; vd.mkdir(parents=True, exist_ok=True)
+    moved = place_commentary_before_the_joke(plan)
+    if moved:
+        log(f"  research narration, then the beat, then the joke ({moved} beat(s))")
+        (sd / "plan.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
+        tf0 = sd / "timings.json"
+        if tf0.exists(): tf0.unlink()
+        for wav in vd.glob("*.wav"): wav.unlink()
     tf = sd / "timings.json"
     t = json.loads(tf.read_text(encoding="utf-8")) if tf.exists() else {}
     todo = [s for s in plan["sections"] if s["id"] not in t]

@@ -843,6 +843,21 @@ def order_commentary_beat_joke(vo, commentary, joke=""):
     return " ".join(part for part in (commentary, body, joke) if part)
 
 
+def place_commentary_before_the_joke(plan):
+    """Spoken order for every beat: the comment, then the beat, then the joke."""
+    n = 0
+    for s in plan.get("sections") or []:
+        if s.get("cta") or not s.get("vo"): continue
+        com = " ".join(str(s.get("commentary") or s.get("take") or "").split())
+        joke = " ".join(str(s.get("punchline") or s.get("joke") or _joke_span(s) or "").split())
+        new = order_commentary_beat_joke(s["vo"], com, joke)
+        if new != " ".join(str(s["vo"]).split()):
+            s["vo"] = new
+            n += 1
+        if com: s["commentary"] = com
+    return n
+
+
 def short_commentary(cfg, plan, log, budget=None):
     """Research narration is spoken before the beat. The joke is spoken after the beat is rendered.
     Skipped once the Short would pass its word budget (3:00). Never blocks the job."""
