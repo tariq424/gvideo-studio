@@ -14,6 +14,16 @@ Three 5.8 fixes, ported from the video-studio-test working tree:
 """
 import json, os, unreal
 
+_KEEP = []
+
+
+def quit_editor():
+    """The host waits for this process to exit. An async MRQ render must quit when it finishes."""
+    try:
+        unreal.SystemLibrary.quit_editor()
+    except Exception as e:
+        unreal.log_error("gvs_mrq quit_editor failed: %s" % e)
+
 
 def level_object_path(level_path):
     """Package path -> object path. A package path is the rotated default map on UE 5.8."""
@@ -145,8 +155,26 @@ def main():
     aa.override_anti_aliasing = True
     cfg.find_or_add_setting_by_class(unreal.MoviePipelineDeferredPassBase)
     cfg.find_or_add_setting_by_class(unreal.MoviePipelineImageSequenceOutput_PNG)
-    qs.render_queue_with_executor_instance(unreal.MoviePipelinePIEExecutor())
+    executor = unreal.MoviePipelinePIEExecutor()
+
+    def finished(ex, success):
+        unreal.log("gvs_mrq finished success=%s" % success)
+        quit_editor()
+
+    def errored(ex, pipeline, fatal, text):
+        unreal.log_error("gvs_mrq error fatal=%s %s" % (fatal, text))
+        quit_editor()
+
+    executor.on_executor_finished_delegate.add_callable(finished)
+    executor.on_executor_errored_delegate.add_callable(errored)
+    _KEEP.extend([executor, finished, errored])
+    qs.render_queue_with_executor_instance(executor)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        unreal.log_error("gvs_mrq failed: %s" % e)
+        quit_editor()
+        raise

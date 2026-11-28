@@ -43,5 +43,11 @@ def create_starter_level(asset_path: str, label: str) -> None:
     subsys.save_current_level()
     unreal.log(f"[GVideoStudio] Created starter template: {asset_path}")
 
-for p, lbl in TEMPLATES:
-    create_starter_level(p, lbl)
+try:
+    for p, lbl in TEMPLATES:
+        create_starter_level(p, lbl)
+finally:
+    try:
+        unreal.SystemLibrary.quit_editor()
+    except Exception as e:
+        unreal.log_error("gvs build_templates quit_editor failed: %s" % e)
