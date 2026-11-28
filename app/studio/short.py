@@ -1383,22 +1383,16 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     rdir = _ensure_remotion(log); out.parent.mkdir(parents=True, exist_ok=True)
     pf = out.with_suffix(".json"); pf.write_text(json.dumps({"g": g, "secs": secs, "w": size[0], "h": size[1]}), encoding="utf-8")
     tmp = out.with_name(out.stem + "_tmp.mp4")
-    cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Recon", str(tmp), f"--props={pf}", f"--gl={_gl(cfg)}",
-           *render_flags(cfg), "--jpeg-quality=92", "--crf=18", "--log=error", *render_browser_args(cfg, log)]
-    on_shell = any("chrome-headless-shell" in a for a in cmd)
-    for attempt in range(4):
-        p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
-        blob = p.stdout + p.stderr
-        if p.returncode == 0 and tmp.exists(): break
-        if on_shell and (BROWSER_FLAKE in blob or attempt >= 1):
-            on_shell = False
-            cmd = pin_installed_chrome(cmd, cfg)
-            log("  the render failed in Remotion's headless Chrome; trying again with the installed Chrome")
-            continue
-        if BROWSER_FLAKE not in blob or attempt == 3: break
-        time.sleep(10)
+    cmd = command_with_browser(
+        [_npx(), "remotion", "render", "src/Root.tsx", "Recon", str(tmp), f"--props={pf}", f"--gl={_gl(cfg)}",
+         *render_flags(cfg), "--jpeg-quality=92", "--crf=18", "--log=error"],
+        render_browser_args(cfg, log))
+    p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
     if p.returncode != 0 or not tmp.exists():
-        raise RuntimeError(" / ".join((p.stdout + p.stderr).strip().splitlines()[-4:])[:300])
+        tail = (p.stdout + p.stderr).strip().splitlines()
+        why = chrome_failure_reason(tail, p.returncode)
+        log(f"  Remotion browser failed: {why}")
+        raise RuntimeError("Remotion render failed: " + why)
     if out.exists(): out.unlink()
     tmp.rename(out); log(f"  reconstruction {out.stem}: {g.get('scene')} ({g.get('name') or ''})")
     return out
@@ -1458,11 +1452,103 @@ def _installed_chrome_candidates():
 def _flags_for_browser(path):
     """Pin the executable. Installed Chrome must use chrome-for-testing so Remotion passes --headless=new.
     The default chrome mode (headless-shell) passes --headless=old; Chrome 128+ starts, paints a few frames, then exits.
+    The headless shell itself dies the other way: --gl=angle never prints DevTools, the process exits 1, and the
+    log keeps the BrowserRunner.js source line (G051: frame 57/792). Software GL lets that shell open.
     Remotion already adds --no-sandbox itself."""
     flags = [f"--browser-executable={path}"]
-    if "chrome-headless-shell" not in Path(path).name.lower():
+    if "chrome-headless-shell" in Path(path).name.lower():
+        flags += ["--chrome-mode=headless-shell", "--gl=swangle", "--timeout=120000"]
+    else:
         flags.append("--chrome-mode=chrome-for-testing")
     return flags
+
+
+def command_with_browser(cmd, browser_args):
+    """Browser flags replace a previous --gl / --timeout / executable pin so the shell's software GL is the one that runs."""
+    if not browser_args:
+        return list(cmd)
+    drop = ("--browser-executable=", "--chrome-mode=")
+    if any(a.startswith("--gl=") for a in browser_args):
+        drop += ("--gl=",)
+    if any(a.startswith("--timeout=") for a in browser_args):
+        drop += ("--timeout=",)
+    return [a for a in cmd if not a.startswith(drop)] + list(browser_args)
+
+
+def chrome_failure_reason(tail, returncode=None):
+    """Why headless Chrome exited. The BrowserRunner.js source line is not the reason."""
+    lines = [re.sub(r"\x1b\[[0-9;]*m", "", l).strip() for l in (tail or []) if l and str(l).strip()]
+    noise = re.compile(r"reject\(new |throw new Error|at Timeout\.onTimeout|at listOnTimeout|node:internal/timers")
+    picked = []
+    for line in lines:
+        if noise.search(line):
+            continue
+        if re.search(r"TimeoutError:|Timed out after \d+ ms while trying to connect|Failed to launch the browser|Target closed|Protocol error|GPU process|Aw, Snap|Chrome logged the following", line, re.I):
+            picked.append(line)
+    rendered = None
+    for line in lines:
+        m = re.search(r"Rendered\s+(\d+)\s*/\s*(\d+)", line)
+        if m:
+            rendered = f"frame {m.group(1)}/{m.group(2)}"
+    bits = []
+    if picked:
+        bits.append(picked[-1][:240])
+    elif rendered and returncode not in (None, 0):
+        bits.append(f"browser quit at {rendered}")
+    if returncode not in (None, 0):
+        code = f"exit {returncode}"
+        if code not in " ".join(bits):
+            bits.append(code)
+        if rendered and rendered not in " ".join(bits):
+            bits.append(rendered)
+    return "; ".join(bits) if bits else "no Chrome log"
+
+
+def browser_unresolved(tail, returncode=None):
+    """The browser never stayed up. Retrying the same launch does not fix it."""
+    blob = "\n".join(tail or [])
+    if re.search(r"Timed out after \d+ ms while trying to connect|Failed to launch the browser|Target closed|GPU process exited|Aw, Snap", blob, re.I):
+        return True
+    if returncode not in (None, 0) and re.search(r"Rendered\s+\d+\s*/", blob) and not re.search(r"compositor|OffthreadVideo|delayRender", blob, re.I):
+        return True
+    return False
+
+
+def assert_short_mp4(out, narration_secs, fps=30, log=print):
+    """The job fails when the Short MP4 is missing, or its length is not the narration."""
+    path = Path(out)
+    if not path.is_file() or path.stat().st_size < 1024:
+        raise RuntimeError(f"Short render failed: MP4 is missing ({path})")
+    narration_secs = float(narration_secs or 0)
+    if narration_secs <= 0:
+        raise RuntimeError(f"Short render failed: no narration length to check against {path.name}")
+    got = media.dur(path)
+    frames = _video_frames(path, fps)
+    expected = max(1, math.ceil(narration_secs * fps))
+    dur_slack = max(1.0, narration_secs * 0.04)
+    frame_slack = max(4, int(expected * 0.04))
+    if abs(got - narration_secs) > dur_slack or abs(frames - expected) > frame_slack:
+        raise RuntimeError(
+            f"Short render failed: {path.name} is {got:.2f}s / {frames} frames, narration is {narration_secs:.2f}s / {expected} frames")
+    log(f"  Short check: {path.name} {path.stat().st_size} bytes, {got:.2f}s, {frames} frames (narration {narration_secs:.2f}s / {expected} frames)")
+    return path
+
+
+def _video_frames(path, fps=30):
+    probe = subprocess.run([media._bin("ffprobe"), "-v", "error", "-select_streams", "v:0",
+                            "-show_entries", "stream=nb_frames,duration", "-of", "json", str(path)],
+                           capture_output=True, text=True, timeout=60)
+    try:
+        stream = (json.loads(probe.stdout or "{}").get("streams") or [{}])[0]
+    except json.JSONDecodeError:
+        stream = {}
+    nb = str(stream.get("nb_frames") or "")
+    if nb.isdigit() and int(nb) > 0:
+        return int(nb)
+    try:
+        return int(round(float(stream.get("duration") or media.dur(path)) * fps))
+    except (TypeError, ValueError):
+        return int(round(media.dur(path) * fps))
 
 
 def chrome_browser_args(cfg):
@@ -1504,7 +1590,7 @@ def render_browser_args(cfg, log=print):
         return _flags_for_browser(path)
     if cfg.get("remotion_headless_shell", True):
         hs = headless_shell(log)
-        if hs: return [f"--browser-executable={hs}"]
+        if hs: return _flags_for_browser(hs)
     return chrome_browser_args(cfg)
 
 
@@ -1558,9 +1644,8 @@ def do_render(job, plan, cfg, meta, log, stop):
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
            *flags, "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
     browser_args = render_browser_args(cfg, log)
-    cmd.extend(browser_args)
-    on_shell = any("chrome-headless-shell" in a for a in browser_args)
-    log(f"  Render browser: {browser_args[0].split('=', 1)[1] if browser_args else 'Remotion default'}")
+    cmd = command_with_browser(cmd, browser_args)
+    log(f"  Render browser: {next((a.split('=', 1)[1] for a in browser_args if a.startswith('--browser-executable=')), 'Remotion default')}")
     log(f"Rendering the Short with Remotion ({total:.0f}s of video; concurrency {conc})...")
     # If the native compositor rejects a valid video, try browser decoding first.
     # Card recovery is per asset and retries are bounded, including browser startup.
@@ -1568,7 +1653,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     timeline = job / "short" / "public" / "teaser.json"
     data = json.loads(timeline.read_text(encoding="utf-8"))
     videos = {b.get("src") for beat in data["beats"] for b in beat.get("bgs", []) if b.get("type") == "video"}
-    browser_retries, shell_retried, gpu_retried = 0, False, False
+    browser_retries = 0
     from . import camera_moves
     for attempt in range(2 * len(videos) + 3):
         if camera_moves.mode(cfg) == "framed":   # framed camera moves: the stills pre-rendered, passed as props (teaser.json unchanged)
@@ -1584,37 +1669,26 @@ def do_render(job, plan, cfg, meta, log, stop):
                 if not errline and re.search(r"\b\w*Error\b|error:", line) and "│" not in line and not line.lstrip().startswith("at "): errline = line[:300]
             if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")
-        if p.wait() == 0: break
-        why = re.sub(r"\x1b\[[0-9;]*m", "", errline or (tail[-1] if tail else "no output"))[:200]
+        code = p.wait()
+        if code == 0: break
+        why = chrome_failure_reason(tail, code)
+        log(f"  Remotion browser failed: {why}")
+        if browser_unresolved(tail, code):
+            for l in tail[-12:]: log("  | " + re.sub(r"\x1b\[[0-9;]*m", "", l)[:220])
+            raise RuntimeError("Remotion render failed: " + why)
         flake = any(BROWSER_FLAKE in l for l in tail)
-        if on_shell:   # the headless shell failed: the installed Chrome (it decoded px7989667 when Remotion's default didn't) first,
-            # before any clip is swapped for a card. A connect timeout switches immediately (the shell never opened a port).
-            # Any other non-video failure (Nov 8: bundling died at 6% while RAM was short) gets one more try in the fast shell.
-            media_err = any(re.search(r"VS-MEDIA-ERROR|extract|decod|compositor|OffthreadVideo|frame", l, re.I) for l in tail)
-            if flake or media_err or shell_retried:
-                on_shell = False
-                pinned = pin_installed_chrome(cmd, cfg)
-                if pinned != cmd:
-                    cmd = pinned
-                    log(f"  the render failed in Remotion's headless Chrome ({why}); trying again with the installed Chrome")
-                    continue
-            else:
-                shell_retried = True
-                log(f"  the render failed in Remotion's headless Chrome ({why}); trying it once more"); time.sleep(10); continue
-        if not gpu_retried and _chrome_died(tail) and any(a.startswith("--gl=") and a != "--gl=swangle" for a in cmd):
-            gpu_retried = True
-            cmd = ["--gl=swangle" if a.startswith("--gl=") else a for a in cmd]
-            log("  installed Chrome died mid-render; retrying with software GL (--gl=swangle, GPU off)"); continue
-        if browser_retries < 2 and flake:
-            # headless Chrome sometimes starts slowly (busy GPU/disk); Remotion gives it 25 s - just start again
+        if browser_retries < 2 and flake and "chrome-headless-shell" not in " ".join(browser_args):
             browser_retries += 1
             log(f"  Remotion couldn't connect to its browser in time; retrying the render ({browser_retries + 1} of 3)"); time.sleep(10); continue
         if fallback_failed_video(timeline, job / "short" / "public", errline + "\n" + "\n".join(tail), log):
             continue
         for l in tail[-15:]: log("  | " + l[:200])
-        raise RuntimeError("Remotion render failed: " + (re.sub(r"\x1b\[[0-9;]*m", "", errline) or " / ".join(x for x in tail[-6:] if x)[:400]))
+        raise RuntimeError("Remotion render failed: " + why)
+    if not tmp.exists():
+        raise RuntimeError(f"Short render failed: MP4 is missing ({tmp})")
     if out.exists(): out.unlink()
     tmp.rename(out)
+    assert_short_mp4(out, total, log=log)
     try:   # keyframes on beat boundaries, so a beat can be replaced later without re-encoding the whole Short
         from . import edit
         from .pipeline import Job

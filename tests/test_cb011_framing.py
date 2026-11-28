@@ -82,6 +82,16 @@ def test_short_shows_full_rendition_on_a_filled_background():
     assert 'objectFit: "contain"' in chunk
 
 
+def test_missing_short_mp4_fails_the_job(tmp_path):
+    missing = tmp_path / "nope.mp4"
+    try:
+        short.assert_short_mp4(missing, 12.0)
+    except RuntimeError as e:
+        assert "MP4 is missing" in str(e)
+    else:
+        raise AssertionError("a missing MP4 must fail the job")
+
+
 def test_end_card_and_hook_added_to_plan():
     plan = {"title": "AI Drew Trump From Text Alone", "tag": "AI IMAGE DETECTIVE",
             "sections": [{"id": "b0", "vo": "Someone fed AI tools a written description. How?", "visuals": [], "queries": []}]}

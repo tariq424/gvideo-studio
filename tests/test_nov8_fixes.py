@@ -142,8 +142,22 @@ def test_headless_shell_first_installed_chrome_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(short, "headless_shell", lambda log=print: None)
     assert "chrome-headless-shell" not in "".join(short.render_browser_args({}, lambda *_: None))
     assert "chrome-headless-shell" not in "".join(short.render_browser_args({"remotion_headless_shell": False}, lambda *_: None))
-    src = (Path(__file__).parents[1] / "app" / "studio" / "short.py").read_text(encoding="utf-8")
-    assert "trying again with the installed Chrome" in src   # a failed shell render retries in Chrome before any clip becomes a card
+    shell = tmp_path / "chrome-headless-shell.exe"
+    monkeypatch.setattr(short, "headless_shell", lambda log=print: shell)
+    flags = short.render_browser_args({}, lambda *_: None)
+    assert flags[0] == f"--browser-executable={shell}"
+    assert "--chrome-mode=headless-shell" in flags and "--gl=swangle" in flags and "--timeout=120000" in flags
+    reason = short.chrome_failure_reason([
+        "Bundling 6%",
+        "reject(new Errors_1.TimeoutError(`Timed out after ${timeout} ms while trying to connect to the browser! Chrome logged the following: ${stdioString}`));",
+        "TimeoutError: Timed out after 30000 ms while trying to connect to the browser! Chrome logged the following:",
+        "Rendered 57/792, time remaining: 1m 55s",
+    ], 1)
+    assert "Timed out after 30000 ms" in reason and "exit 1" in reason and "frame 57/792" in reason
+    assert "reject(new" not in reason
+    assert short.browser_unresolved(["TimeoutError: Timed out after 30000 ms while trying to connect to the browser!"], 1)
+    assert short.browser_unresolved(["Rendered 57/792"], 1)
+    assert not short.browser_unresolved(["Compositor error: OffthreadVideo", "Rendered 57/792"], 1)
     browser = tmp_path / "chrome.exe"
     browser.write_text("", encoding="utf-8")
     monkeypatch.setattr(short, "_installed_chrome_candidates", lambda: [browser])

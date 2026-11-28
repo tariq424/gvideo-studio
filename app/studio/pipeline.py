@@ -692,6 +692,8 @@ class Studio:
                     from . import talkinghead
                     if s.get("presenter") and talkinghead.enabled(cfg):   # talking head over the hook (Hugging Face; optional, never fails the job)
                         out = talkinghead.overlay_short(j.dir, sp, cfg, out, log)
+                    teaser = json.loads((j.dir / "short" / "public" / "teaser.json").read_text(encoding="utf-8"))
+                    short.assert_short_mp4(out, teaser.get("total") or 0, log=log)
                     j.save(short_output=str(out))
                     from . import capcut
                     if capcut.enabled(cfg) and capcut.pending(j.dir):   # ladder v2 rung 7: one CapCut session per video (off by default)
