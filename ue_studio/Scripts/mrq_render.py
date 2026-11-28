@@ -105,6 +105,9 @@ def bind_camera_cut(fps, duration_s, width, height):
 
 
 def main():
+    # -ExecutePythonScript quits the editor as soon as this script returns. The MRQ job is async, so the
+    # editor has to stay up until the finished callback calls quit_editor().
+    unreal.EditorPythonScriptingLibrary.set_keep_python_script_alive(True)
     params_path = os.environ.get("GVS_MRQ_PARAMS", "")
     if not params_path or not os.path.exists(params_path):
         raise RuntimeError("GVS_MRQ_PARAMS not found: %s" % params_path)
