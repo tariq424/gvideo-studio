@@ -1631,16 +1631,19 @@ def _chrome_died(tail):
 
 
 def render_browser_args(cfg, log=print):
-    """An explicit override, else Remotion's headless shell (fast), else the installed Chrome."""
+    """Installed Chrome on the GPU. The headless shell only stays up with the GPU off, and a full Short then takes hours."""
     explicit = cfg.get("remotion_browser_executable")
     if explicit:
         path = Path(explicit)
         if not path.is_file(): raise RuntimeError(f"Configured Remotion browser not found: {explicit}")
         return _flags_for_browser(path)
+    chrome = chrome_browser_args(cfg)
+    if chrome:
+        return chrome
     if cfg.get("remotion_headless_shell", True):
         hs = headless_shell(log)
         if hs: return _flags_for_browser(hs)
-    return chrome_browser_args(cfg)
+    return []
 
 
 def render_concurrency(cfg, log=None, job=None):

@@ -137,13 +137,16 @@ def test_render_workers_stay_at_the_measured_best_and_warn_when_ram_is_low(monke
 
 def test_headless_shell_first_installed_chrome_fallback(monkeypatch, tmp_path):
     from studio import short
-    monkeypatch.setattr(short, "headless_shell", lambda log=print: tmp_path / "chrome-headless-shell.exe")
-    assert "chrome-headless-shell" in short.render_browser_args({}, lambda *_: None)[0]
-    monkeypatch.setattr(short, "headless_shell", lambda log=print: None)
-    assert "chrome-headless-shell" not in "".join(short.render_browser_args({}, lambda *_: None))
-    assert "chrome-headless-shell" not in "".join(short.render_browser_args({"remotion_headless_shell": False}, lambda *_: None))
+    browser = tmp_path / "chrome.exe"
+    browser.write_text("", encoding="utf-8")
     shell = tmp_path / "chrome-headless-shell.exe"
+    monkeypatch.setattr(short, "_installed_chrome_candidates", lambda: [browser])
     monkeypatch.setattr(short, "headless_shell", lambda log=print: shell)
+    flags = short.render_browser_args({}, lambda *_: None)
+    assert flags[0] == f"--browser-executable={browser}"
+    assert "--chrome-mode=chrome-for-testing" in flags
+    assert "chrome-headless-shell" not in "".join(flags)
+    monkeypatch.setattr(short, "_installed_chrome_candidates", lambda: [])
     flags = short.render_browser_args({}, lambda *_: None)
     assert flags[0] == f"--browser-executable={shell}"
     assert "--chrome-mode=headless-shell" in flags and "--gl=swangle" in flags and "--timeout=120000" in flags
