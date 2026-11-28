@@ -402,24 +402,30 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
 
 # ---------------------------------------------------------------- stock footage
 _COMMENTARY_RE = re.compile(
-    r"\b(what is actually happening|database|verdict|imagining from|pulled from a database|"
+    r"\b(what is actually happening|searches? some database|pulled from a database|"
     r"looking things up|which tool did the right|fancy autocomplete|memory with a filter|"
-    r"coincidence stops|our take:|honestly, that is the quiet)\b", re.I)
+    r"coincidence stops being|leaves the verdict|imagining from the text|"
+    r"honestly, that is the quiet scandal)\b", re.I)
+_TOOL_TEST_RE = re.compile(
+    r"\b(grok|bing(?:\.com)?|chatgpt|chat gpt|copilot|gemini|google flow|\bflow\b)\b.{0,80}"
+    r"\b(refused|likeness|drew|produced|test|description|stranger|amazing)\b|"
+    r"\b(refused|likeness|drew|produced|test)\b.{0,80}"
+    r"\b(grok|bing(?:\.com)?|chatgpt|chat gpt|copilot|gemini|google flow|\bflow\b)\b", re.I)
 
 
 def is_commentary(sec):
-    """CB-011: analysis/verdict beats (not a tool test or result) may use the shared ladder + Unreal."""
+    """CB-011: analysis/verdict beats (not a tool test or result) may use the shared ladder + Unreal.
+
+    Only clear commentary markers count. A beat that narrates a named tool's test/result stays own-footage,
+    even when it also has a `take` line — the old take-fallback wrongly classified every beat as commentary."""
     if sec.get("cta"):
         return False
     vo = str(sec.get("vo") or "")
-    if _COMMENTARY_RE.search(vo):
-        return True
-    purpose = str((sec.get("source_visual") or {}).get("purpose") or "").lower()
-    tools = ("grok", "bing", "chatgpt", "copilot", "gemini", "flow", "imagen")
-    result = ("likeness", "on screen", "refused", "drew", "produced", "stranger", "image")
-    if any(t in purpose for t in tools) and any(r in purpose for r in result):
+    purpose = str((sec.get("source_visual") or {}).get("purpose") or "")
+    blob = f"{vo}\n{purpose}"
+    if _TOOL_TEST_RE.search(blob):
         return False
-    return bool(sec.get("take")) and not any(t in purpose for t in tools)
+    return bool(_COMMENTARY_RE.search(blob))
 
 
 def do_stock(job, plan, cfg, log, stop):
