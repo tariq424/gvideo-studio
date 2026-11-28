@@ -60,6 +60,114 @@ def explicit_section_end(section, end_frame):
     section.set_end_frame_bounded(True)
 
 
+def _channels(section):
+    for name in ("get_all_channels", "get_channels"):
+        fn = getattr(section, name, None)
+        if not fn:
+            continue
+        try:
+            found = list(fn())
+        except Exception:
+            continue
+        if found:
+            return found
+    return []
+
+
+def _face_camera(actor):
+    """Text faces its local +X, and local +Z is up. Yaw 180 points that face at a camera on -X without rolling it."""
+    actor.set_actor_rotation(unreal.Rotator(pitch=0.0, yaw=180.0, roll=0.0), False)
+
+
+def _solid(color):
+    base = unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial")
+    try:
+        dyn = unreal.MaterialEditingLibrary.create_dynamic_material_instance(base)
+    except Exception:
+        return base
+    if dyn is None:
+        return base
+    try:
+        dyn.set_vector_parameter_value("Color", color)
+    except Exception:
+        pass
+    return dyn
+
+
+def dress_shot():
+    """The starter template is the engine grid. Put a wall behind upright text and drop the grid material."""
+    wall_mat = _solid(unreal.LinearColor(0.08, 0.10, 0.14, 1.0))
+    floor_mat = _solid(unreal.LinearColor(0.16, 0.16, 0.17, 1.0))
+    for actor in unreal.EditorLevelLibrary.get_all_level_actors():
+        if actor.get_actor_label() == "GVS_Wall":
+            continue
+        smc = actor.get_component_by_class(unreal.StaticMeshComponent) if hasattr(actor, "get_component_by_class") else None
+        if smc is None:
+            continue
+        label = actor.get_actor_label().lower()
+        mat_name = ""
+        try:
+            mat = smc.get_material(0)
+            mat_name = mat.get_name().lower() if mat else ""
+        except Exception:
+            pass
+        if "floor" in label or "grid" in label or "grid" in mat_name:
+            smc.set_material(0, floor_mat)
+    wall = unreal.EditorLevelLibrary.spawn_actor_from_class(
+        unreal.StaticMeshActor, unreal.Vector(-30.0, 0.0, 150.0), unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0))
+    wall.set_actor_label("GVS_Wall")
+    wall.static_mesh_component.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Cube.Cube"))
+    wall.set_actor_scale3d(unreal.Vector(0.2, 6.4, 3.4))
+    wall.static_mesh_component.set_material(0, wall_mat)
+    for actor in unreal.EditorLevelLibrary.get_all_level_actors():
+        lbl = actor.get_actor_label()
+        if lbl not in ("GVS_Title", "GVS_Subtitle"):
+            continue
+        comp = actor.get_component_by_class(unreal.TextRenderComponent)
+        if comp is None:
+            continue
+        _face_camera(actor)
+        comp.set_horizontal_alignment(unreal.HorizTextAligment.EHTA_CENTER)
+        comp.set_vertical_alignment(unreal.VerticalTextAligment.EVRTA_TEXT_CENTER)
+        comp.set_editor_property("text_render_color", unreal.Color(255, 255, 255, 255))
+        if lbl == "GVS_Title":
+            comp.set_world_size(46.0)
+            actor.set_actor_location(unreal.Vector(20.0, 0.0, 200.0), False, False)
+        else:
+            comp.set_world_size(28.0)
+            actor.set_actor_location(unreal.Vector(20.0, 0.0, 120.0), False, False)
+    for actor in unreal.EditorLevelLibrary.get_all_level_actors():
+        if actor.get_actor_label() != "GVS_Camera":
+            continue
+        actor.set_actor_location(unreal.Vector(-860.0, 0.0, 165.0), False, False)
+        actor.set_actor_rotation(unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0), False)
+
+
+def push_camera(sequence, cam, end_frame):
+    """A slow push-in, so the shot is several seconds of motion rather than one held frame."""
+    binding = sequence.add_possessable(cam)
+    track = binding.add_track(unreal.MovieScene3DTransformTrack)
+    section = track.add_section()
+    explicit_section_end(section, end_frame)
+    try:
+        section.set_range(0, int(end_frame))
+    except Exception:
+        pass
+    ch = _channels(section)
+    if len(ch) < 6:
+        unreal.log_error("gvs_mrq: camera has no transform channels (%d)" % len(ch))
+        return binding
+    keys = (
+        (0, (-860.0, 0.0, 165.0), (0.0, 0.0, 0.0)),
+        (int(end_frame), (-500.0, 0.0, 155.0), (0.0, 0.0, 0.0)),
+    )
+    for frame, loc, rot in keys:
+        when = unreal.FrameNumber(int(frame))
+        for channel, value in zip(ch, list(loc) + list(rot) + [1.0, 1.0, 1.0]):
+            channel.add_key(when, float(value), 0.0, unreal.MovieSceneTimeUnit.DISPLAY_RATE)
+    return binding
+
+
 def portrait_filmback(actor, width, height):
     """A landscape sensor on a tall frame turns the map 90 degrees."""
     comp = actor.get_cine_camera_component()
@@ -96,7 +204,7 @@ def bind_camera_cut(fps, duration_s, width, height):
     section = track.add_section()
     explicit_section_end(section, end)
     if cam is not None:
-        binding = sequence.add_possessable(cam)
+        binding = push_camera(sequence, cam, end)
         # UE 5.8: LevelSequence has no make_binding_id, and the binding proxy has no get_binding_id.
         bid = unreal.MovieSceneSequenceExtensions.get_portable_binding_id(sequence, sequence, binding)
         section.set_camera_binding_id(bid)
@@ -128,6 +236,7 @@ def main():
             c = actor.get_component_by_class(unreal.TextRenderComponent)
             if c:
                 c.set_text(unreal.Text(str(spec["subtitle"])))
+    dress_shot()
     fps = int(spec.get("fps", 30))
     duration_s = float(spec.get("duration_s", 2.5))
     width, height = int(spec.get("width", 1080)), int(spec.get("height", 1920))

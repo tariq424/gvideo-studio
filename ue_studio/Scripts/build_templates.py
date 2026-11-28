@@ -21,23 +21,28 @@ def create_starter_level(asset_path: str, label: str) -> None:
     if not made:
         subsys.new_level(asset_path)
     cam = unreal.EditorLevelLibrary.spawn_actor_from_class(
-        unreal.CineCameraActor, unreal.Vector(-420.0, 0.0, 140.0), unreal.Rotator(0.0, 0.0, 0.0)
+        unreal.CineCameraActor, unreal.Vector(-860.0, 0.0, 165.0), unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0)
     )
     if cam: cam.set_actor_label("GVS_Camera")
+    # Text faces local +X and local +Z is up. Yaw 180 aims that face at the camera on -X.
     t = unreal.EditorLevelLibrary.spawn_actor_from_class(
-        unreal.TextRenderActor, unreal.Vector(0.0, 0.0, 220.0), unreal.Rotator(0.0, 180.0, 0.0)
+        unreal.TextRenderActor, unreal.Vector(20.0, 0.0, 200.0), unreal.Rotator(pitch=0.0, yaw=180.0, roll=0.0)
     )
     if t:
         t.set_actor_label("GVS_Title")
         c = t.get_component_by_class(unreal.TextRenderComponent)
-        if c: c.set_text(unreal.Text(label)); c.set_world_size(42.0)
+        if c:
+            c.set_text(unreal.Text(label)); c.set_world_size(46.0)
+            c.set_horizontal_alignment(unreal.HorizTextAligment.EHTA_CENTER)
     s = unreal.EditorLevelLibrary.spawn_actor_from_class(
-        unreal.TextRenderActor, unreal.Vector(0.0, 0.0, 140.0), unreal.Rotator(0.0, 180.0, 0.0)
+        unreal.TextRenderActor, unreal.Vector(20.0, 0.0, 120.0), unreal.Rotator(pitch=0.0, yaw=180.0, roll=0.0)
     )
     if s:
         s.set_actor_label("GVS_Subtitle")
         c = s.get_component_by_class(unreal.TextRenderComponent)
-        if c: c.set_text(unreal.Text("Parameterized MRQ Beat")); c.set_world_size(24.0)
+        if c:
+            c.set_text(unreal.Text("Parameterized MRQ Beat")); c.set_world_size(28.0)
+            c.set_horizontal_alignment(unreal.HorizTextAligment.EHTA_CENTER)
     l = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.PointLight, unreal.Vector(-200.0, 120.0, 280.0))
     if l: l.set_actor_label("GVS_KeyLight")
     subsys.save_current_level()
