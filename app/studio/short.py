@@ -1477,6 +1477,27 @@ def _installed_chrome_candidates():
     return seen
 
 
+def patch_headless_shell_gl(root=None):
+    """The shell's swangle flags are still ANGLE, and this copy of Remotion gives Chrome 25s to open.
+    ANGLE exits before DevTools. Software GL (--disable-gpu) opens, so the connect wait is 120s."""
+    path = Path(root or config.ROOT) / "remotion" / "node_modules" / "@remotion" / "renderer" / "dist" / "open-browser.js"
+    if not path.is_file():
+        return False
+    text = path.read_text(encoding="utf-8")
+    changed = False
+    angle = "if (renderer === 'swangle') {\n        return ['--use-gl=angle', '--use-angle=swiftshader'];\n    }"
+    soft = "if (renderer === 'swangle') {\n        return ['--disable-gpu'];\n    }"
+    if angle in text:
+        text = text.replace(angle, soft, 1)
+        changed = True
+    if "timeout: 25000," in text:
+        text = text.replace("timeout: 25000,", "timeout: 120000,", 1)
+        changed = True
+    if changed:
+        path.write_text(text, encoding="utf-8")
+    return changed
+
+
 def _flags_for_browser(path):
     """Pin the executable. Installed Chrome must use chrome-for-testing so Remotion passes --headless=new.
     The default chrome mode (headless-shell) passes --headless=old; Chrome 128+ starts, paints a few frames, then exits.
@@ -1672,6 +1693,8 @@ def do_render(job, plan, cfg, meta, log, stop):
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
            *flags, "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
     browser_args = render_browser_args(cfg, log)
+    if any("chrome-headless-shell" in a for a in browser_args):
+        patch_headless_shell_gl()
     cmd = command_with_browser(cmd, browser_args)
     log(f"  Render browser: {next((a.split('=', 1)[1] for a in browser_args if a.startswith('--browser-executable=')), 'Remotion default')}")
     log(f"Rendering the Short with Remotion ({total:.0f}s of video; concurrency {conc})...")

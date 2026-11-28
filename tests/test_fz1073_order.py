@@ -15,6 +15,19 @@ def test_a_take_left_off_the_voice_is_spoken_before_the_beat():
     assert writer.place_commentary_before_the_joke(plan) == 0
 
 
+def test_headless_shell_uses_software_gl(tmp_path):
+    js = tmp_path / "remotion" / "node_modules" / "@remotion" / "renderer" / "dist" / "open-browser.js"
+    js.parent.mkdir(parents=True)
+    js.write_text(
+        "if (renderer === 'swangle') {\n        return ['--use-gl=angle', '--use-angle=swiftshader'];\n    }\n        timeout: 25000,\n",
+        encoding="utf-8")
+    from studio import short
+    assert short.patch_headless_shell_gl(tmp_path) is True
+    text = js.read_text(encoding="utf-8")
+    assert "--disable-gpu" in text and "swiftshader" not in text and "timeout: 120000," in text
+    assert short.patch_headless_shell_gl(tmp_path) is False
+
+
 def test_commentary_comes_before_the_beat_and_the_joke_after():
     vo = writer.order_commentary_beat_joke(
         "The plane dropped. A joke lands here. More of the beat.",
