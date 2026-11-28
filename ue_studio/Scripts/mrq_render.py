@@ -131,7 +131,7 @@ def main():
     sequence, end_frame = bind_camera_cut(fps, duration_s, width, height)
     subsys = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     subsys.save_current_level()
-    qs = unreal.get_editor_subsystem(unreal.MoviePipelineQueueEngineSubsystem)
+    qs = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
     q = qs.get_queue()
     q.delete_all_jobs()
     job = q.allocate_new_job(unreal.MoviePipelineExecutorJob)
