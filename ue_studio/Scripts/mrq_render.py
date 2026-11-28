@@ -129,7 +129,7 @@ def dress_shot():
         _face_camera(actor)
         comp.set_horizontal_alignment(unreal.HorizTextAligment.EHTA_CENTER)
         comp.set_vertical_alignment(unreal.VerticalTextAligment.EVRTA_TEXT_CENTER)
-        comp.set_editor_property("text_render_color", unreal.Color(255, 255, 255, 255))
+        comp.set_editor_property("text_render_color", unreal.Color(12, 16, 22, 255))
         if lbl == "GVS_Title":
             comp.set_world_size(52.0)
             actor.set_actor_location(unreal.Vector(40.0, 0.0, 210.0), False, False)
@@ -159,7 +159,7 @@ def push_camera(sequence, cam, end_frame):
         return binding
     keys = (
         (0, (-720.0, 0.0, 175.0), (0.0, 0.0, 0.0)),
-        (int(end_frame), (-300.0, 0.0, 165.0), (0.0, 0.0, 0.0)),
+        (int(end_frame), (-460.0, 0.0, 168.0), (0.0, 0.0, 0.0)),
     )
     for frame, loc, rot in keys:
         when = unreal.FrameNumber(int(frame))
