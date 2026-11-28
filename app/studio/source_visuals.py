@@ -329,8 +329,15 @@ def make(cfg, job, workspace, sec, log):
             # Own screen recordings (CB-011): crop to the on-screen rendition so portrait cover shows the picture, not chat
             # text or desktop wallpaper. When no pane is found, ask Remotion to fit the whole landscape frame.
             framing = {}
-            info0 = inspect_video(dest)
-            aspect = float(info0.get("width") or 0) / max(1.0, float(info0.get("height") or 1))
+            # inspect_video() does not return width/height — probe the file (or OpenCV) for aspect
+            try:
+                import cv2
+                _cap = cv2.VideoCapture(str(dest))
+                _w = float(_cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0); _h = float(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+                _cap.release()
+                aspect = _w / _h if _h else 0.0
+            except Exception:
+                aspect = 0.0
             if own(job) and aspect > 1.2:   # landscape screen recording: find the picture pane; already-cropped clips skip
                 from . import reframe
                 box = reframe.rendition_box(dest)
