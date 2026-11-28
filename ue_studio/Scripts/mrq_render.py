@@ -114,10 +114,10 @@ def dress_shot():
         if "floor" in label or "grid" in label or "grid" in mat_name:
             smc.set_material(0, floor_mat)
     wall = unreal.EditorLevelLibrary.spawn_actor_from_class(
-        unreal.StaticMeshActor, unreal.Vector(-30.0, 0.0, 150.0), unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0))
+        unreal.StaticMeshActor, unreal.Vector(140.0, 0.0, 155.0), unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0))
     wall.set_actor_label("GVS_Wall")
     wall.static_mesh_component.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Cube.Cube"))
-    wall.set_actor_scale3d(unreal.Vector(0.2, 6.4, 3.4))
+    wall.set_actor_scale3d(unreal.Vector(0.12, 5.2, 2.8))
     wall.static_mesh_component.set_material(0, wall_mat)
     for actor in unreal.EditorLevelLibrary.get_all_level_actors():
         lbl = actor.get_actor_label()
@@ -131,15 +131,15 @@ def dress_shot():
         comp.set_vertical_alignment(unreal.VerticalTextAligment.EVRTA_TEXT_CENTER)
         comp.set_editor_property("text_render_color", unreal.Color(255, 255, 255, 255))
         if lbl == "GVS_Title":
-            comp.set_world_size(46.0)
-            actor.set_actor_location(unreal.Vector(20.0, 0.0, 200.0), False, False)
+            comp.set_world_size(52.0)
+            actor.set_actor_location(unreal.Vector(40.0, 0.0, 210.0), False, False)
         else:
-            comp.set_world_size(28.0)
-            actor.set_actor_location(unreal.Vector(20.0, 0.0, 120.0), False, False)
+            comp.set_world_size(32.0)
+            actor.set_actor_location(unreal.Vector(40.0, 0.0, 130.0), False, False)
     for actor in unreal.EditorLevelLibrary.get_all_level_actors():
         if actor.get_actor_label() != "GVS_Camera":
             continue
-        actor.set_actor_location(unreal.Vector(-860.0, 0.0, 165.0), False, False)
+        actor.set_actor_location(unreal.Vector(-720.0, 0.0, 175.0), False, False)
         actor.set_actor_rotation(unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0), False)
 
 
@@ -158,8 +158,8 @@ def push_camera(sequence, cam, end_frame):
         unreal.log_error("gvs_mrq: camera has no transform channels (%d)" % len(ch))
         return binding
     keys = (
-        (0, (-860.0, 0.0, 165.0), (0.0, 0.0, 0.0)),
-        (int(end_frame), (-500.0, 0.0, 155.0), (0.0, 0.0, 0.0)),
+        (0, (-720.0, 0.0, 175.0), (0.0, 0.0, 0.0)),
+        (int(end_frame), (-300.0, 0.0, 165.0), (0.0, 0.0, 0.0)),
     )
     for frame, loc, rot in keys:
         when = unreal.FrameNumber(int(frame))
