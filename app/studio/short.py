@@ -403,9 +403,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
 # ---------------------------------------------------------------- stock footage
 _COMMENTARY_RE = re.compile(
     r"\b(what is actually happening|searches? some database|pulled from a database|"
-    r"looking things up|which tool did the right|fancy autocomplete|memory with a filter|"
-    r"coincidence stops being|leaves the verdict|imagining from the text|"
-    r"honestly, that is the quiet scandal)\b", re.I)
+    r"looking things up|looking up a reference|which tools? did the right|"
+    r"fancy autocomplete|memory with a filter|coincidence stops being|leaves the verdict|"
+    r"imagining from the text|truly imagining|secretly looking up|"
+    r"honestly, that is the quiet scandal|faking it by grabbing)\b", re.I)
 _TOOL_TEST_RE = re.compile(
     r"\b(grok|bing(?:\.com)?|chatgpt|chat gpt|copilot|gemini|google flow|\bflow\b)\b.{0,80}"
     r"\b(refused|likeness|drew|produced|test|description|stranger|amazing)\b|"
