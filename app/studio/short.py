@@ -575,6 +575,15 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 demoted[bid] = pick[bid]; pick[bid] = []
         if demoted: (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
     allneeds = base_needs = _needs(plan, tm, pick, sd, cfg)
+    from . import flight_path as _flight_path
+    for s in plan["sections"]:
+        if s.get("cta") or s["id"] not in tm or not _flight_path.for_narration(s.get("vo") or ""): continue
+        base_needs[s["id"]] = max(int(base_needs.get(s["id"], 0) or 0), 1)
+        if pick.get(s["id"]):
+            log(f"  {s['id']}: stock set aside; this beat is the published descent on T_DataWall")
+            pick[s["id"]] = []
+    if any(_flight_path.for_narration(s.get("vo") or "") for s in plan["sections"]):
+        (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
     if full:   # Review every beat: every beat gets the whole menu, also the ones stock footage already covers (one slot)
         allneeds = {s["id"]: allneeds.get(s["id"], 1) for s in plan["sections"] if not s.get("cta") and s["id"] in tm}
     needs = {k: v for k, v in allneeds.items() if k not in out}
@@ -691,13 +700,20 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 else:
                     items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": imagegen.last_site(), "variant": k})
         # Unreal: v2 ladder order, and CB-011 commentary beats (even when ladder_v2 is off) before the terminal floor
-        if cfg.get("unreal_on", True) and len(items) < n and (v2 or commentary) \
+        route = bool(_flight_path.for_narration(s.get("vo") or ""))
+        if cfg.get("unreal_on", True) and len(items) < n and (v2 or commentary or route) \
                 and rungs.SHARED_RUNG_NAMES.index("unreal") < rungs.SHARED_RUNG_NAMES.index("blender"):
-            from . import unreal_mrq
+            from . import flight_path, unreal_mrq
             if commentary and not v2:
                 log(f"  {s['id']}: commentary — trying Unreal rung (ladder_v2 off)")
-            _uspec = {"template": "T_DataWall", "title": (s.get("vo") or "")[:40], "subtitle": s.get("id", ""),
-                      "width": 1080, "height": 1920, "fps": 30, "duration_s": 2.5}
+            _vo = s.get("vo") or ""
+            _uspec = {"template": unreal_mrq.template_for_text(_vo), "title": _vo[:40], "subtitle": s.get("id", ""),
+                      "vo": _vo, "width": 1080, "height": 1920, "fps": 30, "duration_s": 2.5}
+            _path = flight_path.for_narration(_vo)
+            if _path:
+                _uspec["path"] = _path
+                _uspec["template"] = "T_DataWall"
+                log(f"  {s['id']}: route/plan descent path on T_DataWall ({len(_path)} published points)")
             clip = _safe(log, "unreal", lambda: unreal_mrq.render_beat(_uspec, sd / "unreal" / (s["id"] + "_mrq.mp4"), cfg=cfg, log=log))
             if clip:
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
@@ -707,7 +723,8 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             elif commentary:
                 log(f"  {s['id']}: commentary Unreal produced nothing; not continuing to three.js")
         # Commentary with no earlier shot ends at Unreal. A later rung, including three.js, must not replace that render.
-        stop_after_unreal = commentary_holds_unreal(s, items) or (commentary and not items and not pick.get(s["id"]))
+        has_unreal = any((it or {}).get("rung") == "unreal" for it in items)
+        stop_after_unreal = commentary_holds_unreal(s, items) or (route and has_unreal) or (commentary and not items and not pick.get(s["id"]))
         if stop_after_unreal and commentary_holds_unreal(s, items):
             n = len(items)
         if v2 and not stop_after_unreal and cfg.get("blender_on", True) and len(items) < n:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)

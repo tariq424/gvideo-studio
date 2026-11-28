@@ -212,6 +212,56 @@ def bind_camera_cut(fps, duration_s, width, height):
     return sequence, end
 
 
+def draw_descent(points):
+    """A published track, drawn whole in front of the camera. Altitude is up, so the plunge is visible."""
+    import math
+    if not points or len(points) < 2:
+        return
+    lat0 = sum(float(p["lat"]) for p in points) / len(points)
+    lon0 = sum(float(p["lon"]) for p in points) / len(points)
+    coords = []
+    for p in points:
+        east = (float(p["lon"]) - lon0) * 111.0 * math.cos(math.radians(lat0))
+        north = (float(p["lat"]) - lat0) * 111.0
+        coords.append((east, north, float(p["alt_ft"])))
+    span = max(max(abs(c[0]) for c in coords), max(abs(c[1]) for c in coords), 1.0)
+    top = max(c[2] for c in coords) or 1.0
+    locs = []
+    for east, north, alt in coords:
+        # Portrait frame: keep the track inside the camera, not cropped at the sides.
+        y = (east / span) * 120.0
+        x = 70.0 + (north / span) * 30.0
+        z = 50.0 + (alt / top) * 240.0
+        locs.append(unreal.Vector(x, y, z))
+    sphere = unreal.load_asset("/Engine/BasicShapes/Sphere.Sphere")
+    cube = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
+    mat = _solid(unreal.LinearColor(0.95, 0.45, 0.12, 1.0))
+    for i, loc in enumerate(locs):
+        actor = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.StaticMeshActor, loc, unreal.Rotator(0, 0, 0))
+        actor.set_actor_label("GVS_Path_%02d" % i)
+        actor.static_mesh_component.set_static_mesh(sphere)
+        actor.set_actor_scale3d(unreal.Vector(0.12, 0.12, 0.12))
+        actor.static_mesh_component.set_material(0, mat)
+        if i == 0:
+            continue
+        prev = locs[i - 1]
+        mid = unreal.Vector((prev.x + loc.x) * 0.5, (prev.y + loc.y) * 0.5, (prev.z + loc.z) * 0.5)
+        seg = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.StaticMeshActor, mid, unreal.Rotator(0, 0, 0))
+        seg.set_actor_label("GVS_Leg_%02d" % i)
+        seg.static_mesh_component.set_static_mesh(cube)
+        dx, dy, dz = loc.x - prev.x, loc.y - prev.y, loc.z - prev.z
+        length = max(1.0, (dx * dx + dy * dy + dz * dz) ** 0.5)
+        seg.set_actor_scale3d(unreal.Vector(0.03, 0.03, length / 100.0))
+        if abs(dz) >= abs(dx) and abs(dz) >= abs(dy):
+            seg.set_actor_rotation(unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0), False)
+        else:
+            yaw = math.degrees(math.atan2(dy, dx))
+            pitch = math.degrees(math.atan2(dz, max(1.0, (dx * dx + dy * dy) ** 0.5)))
+            seg.set_actor_rotation(unreal.Rotator(pitch=pitch, yaw=yaw, roll=0.0), False)
+        seg.static_mesh_component.set_material(0, mat)
+    unreal.log("gvs_mrq: descent path %d points" % len(locs))
+
+
 def main():
     # -ExecutePythonScript quits the editor as soon as this script returns. The MRQ job is async, so the
     # editor has to stay up until the finished callback calls quit_editor().
@@ -237,6 +287,8 @@ def main():
             if c:
                 c.set_text(unreal.Text(str(spec["subtitle"])))
     dress_shot()
+    if spec.get("path"):
+        draw_descent(spec["path"])
     fps = int(spec.get("fps", 30))
     duration_s = float(spec.get("duration_s", 2.5))
     width, height = int(spec.get("width", 1080)), int(spec.get("height", 1920))

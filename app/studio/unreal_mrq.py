@@ -195,15 +195,49 @@ def upright_map(png: Path, reference: Path) -> Path:
     return png
 
 
-def render_beat(spec: dict[str, Any], out_mp4: Path, cfg: Optional[dict[str, Any]] = None, log: Optional[Callable[[str], None]] = None, timeout_s: int = 600) -> Optional[Path]:
+def template_for_text(text: str) -> str:
+    """Route and plan shots use the upright data wall. Comparison and proof use their own templates."""
+    blob = text or ""
+    if re.search(r"\b(comparison|compared|versus|\bvs\b|side by side)\b", blob, re.I):
+        return "T_ComparisonLadder"
+    if re.search(r"\b(proof|receipt)\b", blob, re.I):
+        return "T_ProofScreen"
+    return "T_DataWall"
+
+
+def _probe_size(path: Path) -> tuple[int, int]:
+    from . import media
+    probe = subprocess.run(
+        [media._bin("ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, timeout=60)
+    parts = (probe.stdout or "").strip().split(",")
+    if len(parts) != 2 or not parts[0].isdigit():
+        return (0, 0)
+    return int(parts[0]), int(parts[1])
+
+
+def _pad_to_slot(path: Path, width: int, height: int, emit: Callable[[str], None]) -> Optional[Path]:
+    """Fit the picture inside the slot. Padding keeps the whole frame; it does not crop."""
+    from . import media
+    dest = path.with_name(path.stem + "_slot.mp4")
+    ff = subprocess.run(
+        [media._bin("ffmpeg"), "-y", "-i", str(path), "-vf",
+         f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(dest)],
+        capture_output=True, text=True, timeout=180)
+    if ff.returncode != 0 or not dest.exists():
+        emit("unreal_mrq: pad-to-slot encode failed")
+        return None
+    dest.replace(path)
+    return path
+
+
+def _render_once(spec: dict[str, Any], out_mp4: Path, cfg: Optional[dict[str, Any]] = None, log: Optional[Callable[[str], None]] = None, timeout_s: int = 600) -> Optional[Path]:
     emit = log or (lambda _m: None)
     ue_cmd = find_unreal(cfg)
     if not ue_cmd:
         _warn_missing(emit, cfg)
         return None
-    # The rung that fired is Unreal, whether or not the editor then produces frames.
-    emit("RUNG_FIRED unreal_mrq")
-    print("RUNG_FIRED unreal_mrq", flush=True)
     if not UE_PROJECT.exists() or not MRQ_SCRIPT.exists():
         emit("unreal_mrq: ue_studio project or mrq_render.py missing; rung produced nothing")
         return None
@@ -258,6 +292,54 @@ def render_beat(spec: dict[str, Any], out_mp4: Path, cfg: Optional[dict[str, Any
             return None
         emit(f"unreal_mrq: rendered {out_mp4.name} ({len(pngs)} frames)")
         return out_mp4
+
+
+def render_beat(spec: dict[str, Any], out_mp4: Path, cfg: Optional[dict[str, Any]] = None, log: Optional[Callable[[str], None]] = None, timeout_s: int = 600) -> Optional[Path]:
+    """Render the beat. On a failure, read the log, apply one fix, and verify it before giving the rung up."""
+    from . import flight_path, render_repair
+    spec = dict(spec)
+    text = " ".join(str(spec.get(k) or "") for k in ("vo", "title", "subtitle"))
+    spec["template"] = spec.get("template") or template_for_text(text)
+    if not spec.get("path"):
+        found = flight_path.for_narration(text)
+        if found:
+            spec["path"] = found
+    outer = log or (lambda _m: None)
+    box = {"timeout": int(timeout_s), "longer": False}
+    width, height = int(spec.get("width", 1080)), int(spec.get("height", 1920))
+    announced = {"done": False}
+
+    def good(result) -> bool:
+        if not result or not Path(result).is_file():
+            return False
+        got = _probe_size(Path(result))
+        return got == (width, height)
+
+    def once(note: Callable[[str], None]):
+        if not announced["done"]:
+            note(f"RUNG_FIRED unreal_mrq template={spec['template']}")
+            print("RUNG_FIRED unreal_mrq", flush=True)
+            announced["done"] = True
+        result = _render_once(spec, out_mp4, cfg=cfg, log=note, timeout_s=box["timeout"])
+        if result and not good(result):
+            note(f"unreal_mrq: frame is {_probe_size(Path(result))} , slot is {width}x{height}")
+            padded = _pad_to_slot(Path(result), width, height, note)
+            if padded and good(padded):
+                note("fix verified: pad to slot without cropping")
+                return padded
+        return result
+
+    def match_relaunch(blob: str) -> bool:
+        return (not box["longer"]) and ("TIMEOUT" in blob or "no PNG frames" in blob or "editor failed to start" in blob)
+
+    def apply_relaunch(_blob: str) -> None:
+        box["longer"] = True
+        box["timeout"] = box["timeout"] + 300
+
+    return render_repair.run_rung(
+        once, outer,
+        [{"name": "relaunch Unreal with a longer timeout", "match": match_relaunch, "apply": apply_relaunch}],
+        good)
 
 
 def smoke(cfg: Optional[dict[str, Any]] = None, log: Optional[Callable[[str], None]] = None, out_mp4: Optional[Path] = None, timeout_s: int = 90) -> str:

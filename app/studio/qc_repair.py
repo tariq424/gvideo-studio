@@ -357,9 +357,15 @@ def _rung_unreal(ctx):
     """Shared-registry rung immediately ahead of Blender. A miss returns None; Blender is the next rung, not an internal fallback."""
     if not ctx["vo"]: return None, None, "no narration for the span"
     if not ctx["cfg"].get("unreal_on", True): return None, None, "unreal off"
-    from . import unreal_mrq
-    spec = {"template": "T_DataWall", "title": (ctx["vo"] or "")[:40], "subtitle": ctx["key"],
-            "width": ctx["W"], "height": ctx["H"], "fps": 30, "duration_s": float(ctx["need"] or 2.5), "job_name": ctx["key"]}
+    from . import flight_path, unreal_mrq
+    vo = ctx["vo"] or ""
+    spec = {"template": unreal_mrq.template_for_text(vo), "title": vo[:40], "subtitle": ctx["key"],
+            "vo": vo, "width": ctx["W"], "height": ctx["H"], "fps": 30, "duration_s": float(ctx["need"] or 2.5), "job_name": ctx["key"]}
+    path = flight_path.for_narration(vo)
+    if path:
+        spec["path"] = path
+        spec["template"] = "T_DataWall"
+        ctx["log"](f"    route/plan descent path on T_DataWall ({len(path)} published points)")
     out = ctx["work"] / f"{ctx['key']}_unreal.mp4"
     clip = unreal_mrq.render_beat(spec, out, cfg=ctx["cfg"], log=ctx["log"])
     return _checked(ctx, clip, "Unreal MRQ") if clip else (None, None, "Unreal MRQ produced nothing")

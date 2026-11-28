@@ -831,10 +831,21 @@ def _joke_span(s):
     return ""
 
 
+def order_commentary_beat_joke(vo, commentary, joke=""):
+    """Research narration, then the beat, then the joke. The comment before a joke is not left inside the beat."""
+    body = " ".join(str(vo or "").split())
+    commentary = " ".join(str(commentary or "").split())
+    joke = " ".join(str(joke or "").split())
+    if joke and joke in body:
+        body = " ".join(body.replace(joke, " ", 1).split())
+    if commentary and commentary in body:
+        body = " ".join(body.replace(commentary, " ", 1).split())
+    return " ".join(part for part in (commentary, body, joke) if part)
+
+
 def short_commentary(cfg, plan, log, budget=None):
-    """owner, 2026-11-18: every Short beat gets one researched sentence (a surprising fact, turned into our quick opinion) just
-    BEFORE its joke - or at its end when it has no joke yet (the punch-up then follows). Skipped once the Short would pass its
-    word budget (3:00). Never blocks the job."""
+    """Research narration is spoken before the beat. The joke is spoken after the beat is rendered.
+    Skipped once the Short would pass its word budget (3:00). Never blocks the job."""
     c = dict(cfg)
     if c.get("anthropic_api_key"):
         c["script_provider"] = "claude"
@@ -852,12 +863,11 @@ def short_commentary(cfg, plan, log, budget=None):
                 except Exception as e:
                     log(f"  commentary {s['id']} skipped ({str(e)[:120]})"); continue
                 if not com: continue
-                j = _joke_span(s)
-                s["vo"] = s["vo"].replace(j, com + " " + j, 1) if j else s["vo"].rstrip() + " " + com
+                s["vo"] = order_commentary_beat_joke(s["vo"], com, _joke_span(s))
                 s["commentary"] = com; done += 1
     except Exception as e:
         log(f"  commentary stopped early ({str(e)[:120]})")
-    log(f"Short commentary: {done} beat(s) got a researched line before the joke")
+    log(f"Short commentary: {done} beat(s) got research narration before the beat, with the joke after it")
     return plan
 
 
@@ -930,7 +940,8 @@ def extra_jokes(cfg, plan, log, budget=None):
                 asides = [str(x).strip() for x in j["asides"][:k]]
                 for i, a in enumerate(asides):
                     if a[-1:] not in ".!?": a += "."
-                    s["vo"] = _insert_after(s["vo"], (i + 1) / (k + 2), a)
+                    asides[i] = a
+                    s["vo"] = s["vo"].rstrip() + " " + a
                 s["asides"] = asides
                 log(f"  extra joke(s) {s['id']} ({1 + k} in this beat): " + " | ".join(asides))
     except Exception as e:
@@ -1038,20 +1049,18 @@ def punch_up_long(cfg, plan, log, stop=None):
                         if str(e) == "stopped": raise
                         log(f"  commentary {sid} skipped ({str(e)[:120]})")
                 if com:
-                    vo = vo.rstrip() + " " + com; s["take"] = com; s["commentary"] = com; takes += 1
+                    vo = order_commentary_beat_joke(vo, com); s["take"] = com; s["commentary"] = com; takes += 1
                 else:
                   try:
                     t = str(llm.trace(f"take {sid}").chat_json("You write sharp, original one-sentence analysis. Reply with JSON only.",
                             TAKE.format(n=25, vo=vo.replace('"', "'")), max_tokens=300, check=chk_take)["take"]).strip()
                     if t[-1:] not in ".!?": t += "."
-                    vo = _insert_after(vo, 0.6, t); s["take"] = t; takes += 1
+                    vo = order_commentary_beat_joke(vo, t); s["take"] = t; takes += 1
                     log(f"  take {sid} ({llm.name}): {t}")
                   except Exception as e:
                     if str(e) == "stopped": raise
                     log(f"  take {sid} skipped ({str(e)[:120]})")
                 spots = [(1.0, " ".join(_sentences(vo)[-4:]))]
-                if len(vo.split()) > 220:
-                    ss = _sentences(vo); spots.append((0.3, " ".join(ss[:max(2, len(ss) // 3)])))
                 added = []
                 for frac, part in spots:
                     def chk(j):
@@ -1061,7 +1070,7 @@ def punch_up_long(cfg, plan, log, stop=None):
                         joke = str(llm.trace(f"punch-up {sid}").chat_json("You write dry, snarky one-liners. Reply with JSON only.",
                                    PUNCH.format(n=18, vo=part.replace('"', "'")), max_tokens=300, check=chk)["joke"]).strip()
                         if joke[-1:] not in ".!?": joke += "."
-                        vo = vo.rstrip() + " " + joke if frac >= 1.0 else _insert_after(vo, frac, joke)
+                        vo = vo.rstrip() + " " + joke
                         added.append(joke); jokes += 1
                         log(f"  punch-up {sid} ({llm.name}): {joke}")
                     except Exception as e:
@@ -1075,7 +1084,7 @@ def punch_up_long(cfg, plan, log, stop=None):
     n = sum(1 for s in plan["sections"] if not s.get("cta"))
     nc = sum(1 for s in plan["sections"] if s.get("commentary"))
     log(f"Explainer voice: {takes} of {n} sections got our take, {jokes} jokes added ({nc} with researched commentary; "
-        "summary first, commentary second, punch-up last)")
+        "research narration, then the beat, then the joke)")
     return plan
 
 
