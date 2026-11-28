@@ -16,8 +16,10 @@ from pathlib import Path
 
 import numpy as np
 
-VERSION = 3
+VERSION = 4
 SEQ_MIN = 4.5                                      # seconds on screen needed for wide -> subject A -> subject B
+_DATA = Path(__file__).resolve().parent / "data"
+_CASCADE_FILE = _DATA / "haarcascade_frontalface_default.xml"
 
 
 def _frames(path, k=6, width=480):
@@ -41,14 +43,155 @@ def _frames(path, k=6, width=480):
 _CASCADE = [None]
 
 
-def faces(img):
-    """[(x0, y0, x1, y1) fractions] of the faces in a BGR picture."""
+def _cascade():
+    """OpenCV 5 no longer ships haarcascade XMLs under cv2.data; load our bundled copy, then the package path."""
     import cv2
-    if _CASCADE[0] is None:
-        _CASCADE[0] = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    if _CASCADE[0] is not None:
+        return _CASCADE[0]
+    for p in (_CASCADE_FILE, Path(getattr(cv2, "data", object()).haarcascades + "haarcascade_frontalface_default.xml")
+              if hasattr(getattr(cv2, "data", None), "haarcascades") else None):
+        if not p:
+            continue
+        try:
+            c = cv2.CascadeClassifier(str(p))
+            if c is not None and not c.empty():
+                _CASCADE[0] = c
+                return c
+        except Exception:
+            continue
+    _CASCADE[0] = False
+    return None
+
+
+def faces(img, min_frac=0.07):
+    """[(x0, y0, x1, y1) fractions] of the faces in a BGR picture. Empty when the cascade is unavailable.
+
+    min_frac: smallest face as a fraction of the short side (0.07 for close-ups; ~0.02 for faces inside a screen recording)."""
+    import cv2
+    c = _cascade()
+    if not c:
+        return []
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY); h, w = g.shape
-    m = max(20, int(min(h, w) * 0.07))
-    return [(x / w, y / h, (x + fw) / w, (y + fh) / h) for x, y, fw, fh in _CASCADE[0].detectMultiScale(g, 1.1, 6, minSize=(m, m))]
+    m = max(16, int(min(h, w) * min_frac))
+    return [(x / w, y / h, (x + fw) / w, (y + fh) / h) for x, y, fw, fh in c.detectMultiScale(g, 1.1, 5, minSize=(m, m))]
+
+
+def rendition_box(path_or_img, pad=0.04):
+    """Locate the dominant on-screen picture (an AI-tool rendition pane) in a landscape screen recording.
+
+    -> (x0, y0, x1, y1) fractions of the frame, or None when nothing photo-like is found (desktop/wallpaper, chat text).
+    Prefers a compact photo region that contains a face over a near-full-frame window chrome blob."""
+    import cv2
+    if hasattr(path_or_img, "shape"):
+        fr = [path_or_img]
+    else:
+        p = Path(path_or_img)
+        if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+            im = cv2.imread(str(p), cv2.IMREAD_COLOR)
+            fr = [] if im is None else [im]
+        else:
+            fr = _frames(p, k=5, width=640)
+    if not fr:
+        return None
+    # score blocks on the middle frame (and average with neighbours when present)
+    im = fr[len(fr) // 2]
+    h, w = im.shape[:2]
+    small = cv2.resize(im, (480, max(1, int(480 * h / max(w, 1)))))
+    sh, sw = small.shape[:2]
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    sat = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)[:, :, 1].astype(np.float32)
+    bh = bw = 16
+    rows, cols = max(1, sh // bh), max(1, sw // bw)
+    score = np.zeros((rows, cols), np.float32)
+    for r in range(rows):
+        for col in range(cols):
+            y0, x0 = r * bh, col * bw
+            patch = small[y0:y0 + bh, x0:x0 + bw]
+            g = gray[y0:y0 + bh, x0:x0 + bw]
+            s = sat[y0:y0 + bh, x0:x0 + bw]
+            white = float(((patch[:, :, 0] > 220) & (patch[:, :, 1] > 220) & (patch[:, :, 2] > 220)).mean())
+            score[r, col] = (float(s.mean()) / 255.0) * 1.2 + (float(g.std()) / 64.0) * 0.9 - white * 1.5
+    thr = max(0.35, float(np.percentile(score, 70)))
+    mask = (score > thr).astype(np.uint8)
+    mask = cv2.dilate(mask, np.ones((2, 2), np.uint8), iterations=1)
+    n, _labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    # screen recordings: the subject face sits inside a chat pane and is a small fraction of the desktop frame
+    fs = [f for im2 in fr for f in faces(im2, min_frac=0.02)]
+    best, best_sc = None, -1.0
+    for i in range(1, n):
+        x, y, ww, hh, area = stats[i]
+        if area < (rows * cols) * 0.035:
+            continue
+        x0, y0 = x * bw / sw, y * bh / sh
+        x1, y1 = min(1.0, (x + ww) * bw / sw), min(1.0, (y + hh) * bh / sh)
+        bw_f, bh_f = x1 - x0, y1 - y0
+        if bw_f < 0.12 or bh_f < 0.12:
+            continue
+        if bw_f > 0.92 and bh_f > 0.85:          # full-bleed wallpaper / whole desktop
+            continue
+        if y0 > 0.88:                              # taskbar strip
+            continue
+        aspect = bw_f / max(bh_f, 1e-6)
+        if aspect > 3.5 or aspect < 0.25:          # chrome bars, sidebars
+            continue
+        # ignore tiny UI faces (Clipchamp camera tile, avatars); a real rendition face is larger
+        face_hit = any(x0 - 0.02 <= (f[0] + f[2]) / 2 <= x1 + 0.02 and y0 - 0.02 <= (f[1] + f[3]) / 2 <= y1 + 0.02
+                       and (f[2] - f[0]) >= 0.025 for f in fs)
+        # prefer mid-size photo panes with a face; penalise giant chat windows AND tiny sidebar tiles
+        compact = 1.0 - min(1.0, abs(aspect - 1.35) / 2.0)
+        area = bw_f * bh_f
+        size_pen = 0.35 if area > 0.55 else (0.9 if area < 0.08 else 0.0)
+        sc = float(score[y:y + hh, x:x + ww].mean()) * (1.0 + 1.2 * face_hit + 0.35 * compact) - size_pen
+        sc += min(0.6, area * 0.8)   # larger picture panes beat sidebar previews of similar score
+        if sc > best_sc:
+            best_sc, best = sc, (x0, y0, x1, y1)
+    if not best and fs:
+        # fall back: pad around the largest face into a photo-ish box
+        f = max(fs, key=lambda a: (a[2] - a[0]) * (a[3] - a[1]))
+        cx, cy = (f[0] + f[2]) / 2, (f[1] + f[3]) / 2
+        side = max(0.22, min(0.55, (f[2] - f[0]) * 4.5))
+        best = (max(0.0, cx - side * 0.55), max(0.0, cy - side * 0.45),
+                min(1.0, cx + side * 0.55), min(1.0, cy + side * 0.7))
+    if not best:
+        return None
+    x0, y0, x1, y1 = best
+    # a giant chat window that merely contains the picture: tighten onto the largest real face inside it
+    if (x1 - x0) * (y1 - y0) > 0.45:
+        inside = [f for f in fs if x0 <= (f[0] + f[2]) / 2 <= x1 and y0 <= (f[1] + f[3]) / 2 <= y1 and (f[2] - f[0]) >= 0.025]
+        if inside:
+            f = max(inside, key=lambda a: (a[2] - a[0]) * (a[3] - a[1]))
+            cx, cy = (f[0] + f[2]) / 2, (f[1] + f[3]) / 2
+            side_w = max(0.28, min(0.50, (f[2] - f[0]) * 5.5))
+            side_h = max(0.32, min(0.62, (f[3] - f[1]) * 6.5))
+            x0 = max(x0, cx - side_w * 0.55); x1 = min(x1, cx + side_w * 0.55)
+            y0 = max(y0, cy - side_h * 0.4); y1 = min(y1, cy + side_h * 0.7)
+    x0, y0 = max(0.0, x0 - pad), max(0.0, y0 - pad)
+    x1, y1 = min(1.0, x1 + pad), min(1.0, y1 + pad)
+    if (x1 - x0) < 0.15 or (y1 - y0) < 0.15:
+        return None
+    return (round(x0, 3), round(y0, 3), round(x1, 3), round(y1, 3))
+
+
+def crop_video_to_box(path, box, log=print):
+    """Rewrites `path` cropped to box (x0,y0,x1,y1 fractions) so the rendition fills the clip. -> True on success."""
+    from . import media
+    path = Path(path)
+    x0, y0, x1, y1 = box
+    # even pixel sizes for libx264
+    vf = (f"crop=floor(iw*{x1 - x0}/2)*2:floor(ih*{y1 - y0}/2)*2:"
+          f"floor(iw*{x0}/2)*2:floor(ih*{y0}/2)*2,scale=960:-2")
+    tmp = path.with_name(path.stem + "_rendition" + path.suffix)
+    try:
+        media.ff("-i", path, "-an", "-vf", vf, "-c:v", "libx264", "-crf", 20, "-pix_fmt", "yuv420p", tmp, timeout=180)
+        if tmp.is_file() and tmp.stat().st_size > 8000:
+            tmp.replace(path)
+            log(f"  rendition crop: kept picture region ({x0:.2f},{y0:.2f})-({x1:.2f},{y1:.2f}) of {path.name}")
+            return True
+    except Exception as e:
+        log(f"  rendition crop skipped ({str(e)[:80]})")
+    finally:
+        tmp.unlink(missing_ok=True)
+    return False
 
 
 def _groups(spans, cw, gap=0.12, slack=1.05, col=None):
@@ -74,7 +217,10 @@ def _groups(spans, cw, gap=0.12, slack=1.05, col=None):
 
 def analyse(path, W, H):
     """-> {"pos": 0..1} | {"fit": "frame"[, "two": [a, b]]} | {} for a clip shown in a W x H frame (only a frame narrower than
-    the clip is cropped). "two": the crop positions of two separate subjects, for the wide -> each-in-turn sequence."""
+    the clip is cropped). "two": the crop positions of two separate subjects, for the wide -> each-in-turn sequence.
+
+    Own-footage screen recordings: when a rendition image pane is found and is wider than the tall crop, prefer showing the
+    whole frame (fit "frame") over a blind centre crop that leaves the picture as a side cut-out next to chat text."""
     fr = _frames(path)
     if not fr: return {}
     ih, iw = fr[0].shape[:2]
@@ -111,6 +257,15 @@ def analyse(path, W, H):
         # outstretched hand or shoulder edge may fall outside - far better than one crop straddling both people
         two = _groups(runs, cw, slack=1.35, col=col)
         return {"fit": "frame", "two": two} if two else {"fit": "frame"}
+    # CB-011: screen-recording with a photo pane but no face cascade hit — keep the picture whole, never a blind centre crop
+    box = rendition_box(path)
+    if box:
+        x0, _y0, x1, _y1 = box
+        if x1 - x0 <= cw * 1.05:
+            return {"pos": _pos((x0 + x1) / 2, cw), "rendition": True}
+        return {"fit": "frame", "rendition": True}
+    if cw < 0.85:
+        return {"fit": "frame"}
     return {}
 
 

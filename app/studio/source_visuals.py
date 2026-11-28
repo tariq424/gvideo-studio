@@ -326,10 +326,25 @@ def make(cfg, job, workspace, sec, log):
             # Full-frame video, the same item type as stock and Flow clips (copied into the render's public dir and
             # played by <Vid>). It used to be a small picture-in-picture inside a graphic, shown for at most 3 s and
             # then replaced by a synthetic graphic, so on screen it looked like the beat fell through to graphics.
+            # Own screen recordings (CB-011): crop to the on-screen rendition so portrait cover shows the picture, not chat
+            # text or desktop wallpaper. When no pane is found, ask Remotion to fit the whole landscape frame.
+            framing = {}
+            info0 = inspect_video(dest)
+            aspect = float(info0.get("width") or 0) / max(1.0, float(info0.get("height") or 1))
+            if own(job) and aspect > 1.2:   # landscape screen recording: find the picture pane; already-cropped clips skip
+                from . import reframe
+                box = reframe.rendition_box(dest)
+                area = ((box[2] - box[0]) * (box[3] - box[1])) if box else 0.0
+                if box and area < 0.75 and reframe.crop_video_to_box(dest, box, log=log):
+                    framing = {"rendition": True, "framing": "rendition-crop"}
+                else:
+                    framing = {"fit": "frame", "framing": "fit-frame"}
+                    log(f"  {bid}: no clear rendition pane; landscape source will show whole (fit=frame)")
             secs = round(float(inspect_video(dest).get("duration") or req["duration"]), 2)
-            log(f"  {bid}: source clip ready: {dest.name} ({secs:.1f}s at {req['start']:.1f}s of the source), shown full frame")
+            log(f"  {bid}: source clip ready: {dest.name} ({secs:.1f}s at {req['start']:.1f}s of the source), shown full frame"
+                + (f" [{framing.get('framing')}]" if framing else ""))
             return {"type": "video", "path": str(dest), "secs": secs, "rate": 1.0, "freeze": True, "tag": tag,
-                    "rung": "source", "credit": credit[:100], "timestamp": req["start"]}
+                    "rung": "source", "credit": credit[:100], "timestamp": req["start"], **framing}
         return {"type": "image", "path": str(dest), "tag": tag, "rung": "source", "credit": credit[:100], "short_credit": credit[:40],
                 "timestamp": req["start"]}
     except Exception as error:
@@ -427,7 +442,9 @@ def snapshot(cfg, job, workspace, sec, log, source_item=None):
     return {"path": str(still), "from": origin}
 
 def _frame_content_score(img_path):
+    """Prefer frames with a photo/rendition on screen; reject mostly-text chat and bare desktop/wallpaper."""
     from PIL import Image, ImageStat
+    from . import reframe
     with Image.open(img_path) as im:
         rgb = im.convert("RGB").resize((160, 90))
         hsv = rgb.convert("HSV")
@@ -435,7 +452,23 @@ def _frame_content_score(img_path):
         wf = sum(1 for r, g, b in px if r > 225 and g > 225 and b > 225) / max(1, len(px))
         sat = ImageStat.Stat(hsv).mean[1] / 255.0
         var = sum(ImageStat.Stat(rgb).stddev) / (3.0 * 128.0)
-        return (sat * 1.4) + (var * 0.8) - (wf * 1.3)
+        score = (sat * 1.4) + (var * 0.8) - (wf * 1.3)
+    try:
+        import cv2
+        bgr = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+        if bgr is not None:
+            box = reframe.rendition_box(bgr)
+            if box:
+                x0, y0, x1, y1 = box
+                score += 1.6 + 1.2 * ((x1 - x0) * (y1 - y0))   # a found picture pane is the point
+            else:
+                # no photo pane: likely wallpaper / chat text / desktop chrome
+                score -= 1.8
+            if reframe.faces(bgr):
+                score += 0.6
+    except Exception:
+        pass
+    return score
 def _best_own_frame(local, start, duration, dest, total, req, log):
     import tempfile
     best_t, best_s = start, -9.0

@@ -373,8 +373,25 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     # viewers leave there). owner, 2026-11-18: no "summarized from <source>" on the end card either - the source is credited in
     # the description only.
     cta_vo = "Follow for more."
-    cta = {"kind": "cta", "badge": "", "title": "", "line": "Follow for more", "play": False, "arrow": False}
+    # CB-011: end card needs a title (Remotion draws the card only when title/thumb/play is set)
+    cta = {"kind": "cta", "badge": str(plan.get("tag") or "")[:24], "title": str(plan.get("title") or "")[:80],
+           "line": "Follow for more", "play": False, "arrow": True}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
+    # CB-011: opening beat gets a hook graphic under the cold-open line when the script left visuals empty
+    opener = next((x for x in plan["sections"] if not x.get("cta")), None)
+    if opener and not any(isinstance(v.get("chart"), dict) and v["chart"].get("kind") == "hook" for v in opener.get("visuals") or []):
+        first = re.split(r"[.!?]", opener.get("vo") or "", 1)[0].strip()
+        words = [w for w in re.findall(r"[A-Za-z0-9']+", first) if w]
+        lines, buf = [], []
+        for w_ in words[:12]:
+            buf.append(w_.upper())
+            if len(buf) >= 3:
+                lines.append(" ".join(buf)); buf = []
+            if len(lines) >= 3: break
+        if buf and len(lines) < 3: lines.append(" ".join(buf))
+        if lines:
+            opener.setdefault("visuals", []).insert(0, {"type": "chart", "chart": {"kind": "hook", "lines": lines[:4], "accent": min(1, len(lines) - 1)}, "at": None})
+            log(f"  {opener['id']}: hook graphic added under the opening line")
     w = sum(len(s["vo"].split()) for s in plan["sections"])
     for x in plan["sections"]:   # did the fact-check / jargon passes keep the voice?
         if x.get("cta"): continue
@@ -384,6 +401,27 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     return plan
 
 # ---------------------------------------------------------------- stock footage
+_COMMENTARY_RE = re.compile(
+    r"\b(what is actually happening|database|verdict|imagining from|pulled from a database|"
+    r"looking things up|which tool did the right|fancy autocomplete|memory with a filter|"
+    r"coincidence stops|our take:|honestly, that is the quiet)\b", re.I)
+
+
+def is_commentary(sec):
+    """CB-011: analysis/verdict beats (not a tool test or result) may use the shared ladder + Unreal."""
+    if sec.get("cta"):
+        return False
+    vo = str(sec.get("vo") or "")
+    if _COMMENTARY_RE.search(vo):
+        return True
+    purpose = str((sec.get("source_visual") or {}).get("purpose") or "").lower()
+    tools = ("grok", "bing", "chatgpt", "copilot", "gemini", "flow", "imagen")
+    result = ("likeness", "on screen", "refused", "drew", "produced", "stranger", "image")
+    if any(t in purpose for t in tools) and any(r in purpose for r in result):
+        return False
+    return bool(sec.get("take")) and not any(t in purpose for t in tools)
+
+
 def do_stock(job, plan, cfg, log, stop):
     """Pexels + Pixabay (+ NASA for space beats): ranked by meaning, checked by the vision model, cut at high quality."""
     from . import footage
@@ -401,6 +439,14 @@ def do_stock(job, plan, cfg, log, stop):
             need[s["id"]] = 1
         elif s.get("subject"):
             continue   # locked to a specific subject: stock libraries don't have it; real photos / reconstruction come in short_fallback
+        elif is_commentary(s):
+            # commentary: outside stills/video allowed; drop UI-avoid lists that zero the stock search
+            secs = len(s["vo"].split()) / tts.wpm(cfg) * 60 + GAP
+            qs = [q for q in (s.get("queries") or []) if isinstance(q, str)][:3] or [
+                "abstract data network visualization", "server room lights bokeh", "silhouette thinking at window"]
+            slots.append({"id": s["id"], "text": s["vo"], "queries": qs, "subject": None, "avoid": [], "commentary": True})
+            need[s["id"]] = max(2, min(3, math.ceil(secs / 6.0)))
+            log(f"  {s['id']}: commentary beat — stock ladder open (UI avoids cleared)")
         else:
             secs = len(s["vo"].split()) / tts.wpm(cfg) * 60 + GAP
             slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"], "subject": s.get("subject"), "avoid": s.get("avoid") or []})
@@ -548,7 +594,14 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     def prepare(s):
         n = needs[s["id"]]; items = []; rej = []
         from . import source_visuals
-        raw_source = _safe(log, f"{s['id']} source clip", lambda: source_visuals.make(cfg, job, sd, s, log))
+        commentary = is_commentary(s)
+        raw_source = None
+        # CB-011: commentary/analysis/verdict beats use the shared ladder (stock → stills → Unreal), not own-footage fill.
+        # Tool test/result beats stay own-footage only.
+        if commentary:
+            log(f"  {s['id']}: commentary beat — skipping own-footage fill; ladder (stock/stills/Unreal) first")
+        else:
+            raw_source = _safe(log, f"{s['id']} source clip", lambda: source_visuals.make(cfg, job, sd, s, log))
         if raw_source and raw_source.get("type") == "video" and (cfg.get("skip_faceless_source", True) and not source_visuals.own(job)):
             # owner, 2026-11-17: a source clip of hands and torsos with no face in it (a tight two-shot) is a hand on black in a
             # tall frame; the beat gets a picture from the next rung instead (or its stock back)
@@ -560,13 +613,13 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if raw_source:
             source = dict(raw_source); source["src"] = _rel_sd(source.pop("path"), sd)
             items.append(source)
-            if source_visuals.own(job) and len(items) < n:
+            if source_visuals.own(job) and len(items) < n and not commentary:
                 used_ts = [float(source.get("timestamp") or 0.0)]
                 sid = s["id"]
                 extras = _safe(log, sid + " own_footage extra slots", lambda: source_visuals.make_many(cfg, job, sd, s, log, count=n-len(items), used_starts=used_ts), []) or []
                 for ex in extras:
                     ex2 = dict(ex); ex2["src"] = _rel_sd(ex2.pop("path"), sd); items.append(ex2)
-        elif s["id"] in demoted:   # the source clip failed: the beat gets back the stock set aside for it
+        elif s["id"] in demoted and not commentary:   # the source clip failed: the beat gets back the stock set aside for it
             pick[s["id"]] = demoted.pop(s["id"])
             (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
             log(f"  {s['id']}: source clip failed; the stock set aside for it is back ({len(pick[s['id']])} clip(s))")
@@ -622,14 +675,22 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                                   "rung": "imagegen", "site": imagegen.last_site(), "described": bool(snap), "variant": k})
                 else:
                     items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": imagegen.last_site(), "variant": k})
-        if v2 and cfg.get("unreal_on", True) and len(items) < n and rungs.SHARED_RUNG_NAMES.index("unreal") < rungs.SHARED_RUNG_NAMES.index("blender"):
+        # Unreal: v2 ladder order, and CB-011 commentary beats (even when ladder_v2 is off) before the terminal floor
+        if cfg.get("unreal_on", True) and len(items) < n and (v2 or commentary) \
+                and rungs.SHARED_RUNG_NAMES.index("unreal") < rungs.SHARED_RUNG_NAMES.index("blender"):
             from . import unreal_mrq
+            if commentary and not v2:
+                log(f"  {s['id']}: commentary — trying Unreal rung (ladder_v2 off)")
             _uspec = {"template": "T_DataWall", "title": (s.get("vo") or "")[:40], "subtitle": s.get("id", ""),
                       "width": 1080, "height": 1920, "fps": 30, "duration_s": 2.5}
             clip = _safe(log, "unreal", lambda: unreal_mrq.render_beat(_uspec, sd / "unreal" / (s["id"] + "_mrq.mp4"), cfg=cfg, log=log))
             if clip:
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
                               "tag": "GENERATED · UNREAL", "rung": "unreal"})
+                if commentary:
+                    log(f"  {s['id']}: commentary rung fired: unreal")
+            elif commentary:
+                log(f"  {s['id']}: commentary Unreal skipped (no output); continuing toward terminal floor")
         if v2 and cfg.get("blender_on", True) and len(items) < n:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)
             from . import mediaroutes
             clip = _safe(log, "blender", lambda: mediaroutes.blender_rung(cfg, sd, s, f"{s['id']}_blender", log, aspect="9:16"))
@@ -1222,6 +1283,9 @@ def build(job, plan, cfg, log):
                 if c.get("rate"): bg["rate"] = c["rate"]   # v2 GRAPHICS clips play at real speed and hold their last frame
                 if c.get("freeze"): bg["freezeAt"] = max(0.1, round(c.get("secs", FB_SECS) - 0.1, 2))
                 if c.get("textbg"): bg["textbg"] = True
+                # CB-011: own-footage landscape clips carry fit/pos from the rendition framer
+                if c.get("fit"): bg["fit"] = c["fit"]
+                if c.get("pos") is not None: bg["pos"] = c["pos"]
             elif c["type"] == "layers":
                 srcs = []
                 for lp in c["layers"]:
