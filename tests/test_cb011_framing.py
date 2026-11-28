@@ -57,6 +57,31 @@ def test_is_commentary_detects_verdict_not_tool_test():
     assert not short.is_commentary({"cta": True, "vo": "Follow for more."})
 
 
+def test_commentary_stops_at_unreal_and_skips_threejs():
+    sec = {"id": "b5", "vo": "So what is actually happening? Either it searches some database, or imagines."}
+    assert short.is_commentary(sec)
+    assert short.commentary_holds_unreal(sec, [{"rung": "unreal", "type": "video"}])
+    assert not short.commentary_holds_unreal(sec, [{"rung": "stock"}])
+    chain, why, failed = [], [], []
+    assert short._threejs_item({"threejs_on": True}, None, sec, {"key": "b5_0"}, chain, why, failed, lambda m: None) is None
+    assert chain == []
+    src = Path(short.__file__).read_text(encoding="utf-8")
+    assert '"template": "T_DataWall"' in src
+    assert "commentary beat stops at unreal" in src
+
+
+def test_short_shows_full_rendition_on_a_filled_background():
+    root = Path(__file__).resolve().parents[1]
+    visuals = (root / "app" / "studio" / "source_visuals.py").read_text(encoding="utf-8")
+    assert "crop_video_to_box" not in visuals
+    assert '"fit": "frame"' in visuals
+    bg = (root / "remotion" / "src" / "Background.tsx").read_text(encoding="utf-8")
+    start = bg.index('bg.type === "video" && bg.fit === "frame"')
+    chunk = bg[start:start + 900]
+    assert 'filter: "blur(38px)' in chunk
+    assert 'objectFit: "contain"' in chunk
+
+
 def test_end_card_and_hook_added_to_plan():
     plan = {"title": "AI Drew Trump From Text Alone", "tag": "AI IMAGE DETECTIVE",
             "sections": [{"id": "b0", "vo": "Someone fed AI tools a written description. How?", "visuals": [], "queries": []}]}

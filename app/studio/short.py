@@ -432,6 +432,11 @@ def is_commentary(sec):
     return False
 
 
+def commentary_holds_unreal(sec, items):
+    """A commentary beat that has an Unreal render stops there. three.js and the rungs after Unreal do not run."""
+    return bool(is_commentary(sec) and any((it or {}).get("rung") == "unreal" for it in (items or [])))
+
+
 def do_stock(job, plan, cfg, log, stop):
     """Pexels + Pixabay (+ NASA for space beats): ranked by meaning, checked by the vision model, cut at high quality."""
     from . import footage
@@ -698,10 +703,14 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
                               "tag": "GENERATED · UNREAL", "rung": "unreal"})
                 if commentary:
-                    log(f"  {s['id']}: commentary rung fired: unreal")
+                    log(f"  {s['id']}: commentary rung fired: unreal — stop (no three.js)")
             elif commentary:
-                log(f"  {s['id']}: commentary Unreal skipped (no output); continuing toward terminal floor")
-        if v2 and cfg.get("blender_on", True) and len(items) < n:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)
+                log(f"  {s['id']}: commentary Unreal produced nothing; not continuing to three.js")
+        # Commentary with no earlier shot ends at Unreal. A later rung, including three.js, must not replace that render.
+        stop_after_unreal = commentary_holds_unreal(s, items) or (commentary and not items and not pick.get(s["id"]))
+        if stop_after_unreal and commentary_holds_unreal(s, items):
+            n = len(items)
+        if v2 and not stop_after_unreal and cfg.get("blender_on", True) and len(items) < n:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)
             from . import mediaroutes
             clip = _safe(log, "blender", lambda: mediaroutes.blender_rung(cfg, sd, s, f"{s['id']}_blender", log, aspect="9:16"))
             if not clip:
@@ -712,7 +721,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             if clip:
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
                               "tag": "GENERATED · BLENDER", "rung": "blender"})
-        if v2 and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)) and len(items) < n:   # rung 5: Meta video (free) -> Flow (paid): only a beat nothing else could fill
+        if v2 and not stop_after_unreal and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)) and len(items) < n:   # rung 5: Meta video (free) -> Flow (paid): only a beat nothing else could fill
             from . import mediaroutes
             clip, vtag, vrung = _safe(log, "AI video", lambda: mediaroutes.video_rung(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16")) or (None, None, None)
             if clip:
@@ -721,7 +730,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
         # owner, 2026-11-12: the script's route map is a drawing - in the v2 ladder it waits until every picture rung failed
         # (_v2_rungs, before the templates); the old ladder keeps it here
-        if bd.get("kind") == "map" and len(items) < n and not v2:
+        if bd.get("kind") == "map" and len(items) < n and not v2 and not stop_after_unreal:
             if map_useful(bd): items.append({"type": "graphic", "g": bd, "rung": "map"})
             else: log(f"  {s['id']}: map skipped: its places are too close together to show on a map (they would sit on one dot)")
         have = len(pick.get(s["id"], []))
@@ -729,7 +738,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if s["id"] not in base_needs: why1 = ""   # stock covers this beat; the other treatments are made for the review menu
         act = physics.action(s)[0] if v2 else ""   # v2: a beat describing an action is animated (physics / graphics / illustration), never a still
         if s.get("subject") and act: why1 = f"action beat ({act}): a still photo can't show it"
-        elif s.get("subject") and len(items) < n and not source and not v2:   # (v2 has no real-photo rung) a beat with its source clip needs no photo search
+        elif not stop_after_unreal and s.get("subject") and len(items) < n and not source and not v2:   # (v2 has no real-photo rung) a beat with its source clip needs no photo search
             inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", " ".join(s["queries"]), re.I)
             bp = phases.get(s["id"], ""); pics = []
             if inside: why1 = "inside the aircraft: no real photo of it"
@@ -764,7 +773,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         # Flow) never loads WanGP for its extra slots: they go on to physics / graphics / headline, or the picture holds.
         if v2 and not wan_why and (items or pick.get(s["id"])):
             wan_why = "an earlier rung already gave this beat a picture (WanGP is the last resort)"
-        for k in range(n - len(items)):
+        if stop_after_unreal:
+            log(f"  {s['id']}: commentary beat stops at unreal")
+        for k in ([] if stop_after_unreal else range(n - len(items))):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
                           "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot,
                           "person": cloudgen.has_person(s["vo"], ents), "wan": not wan_why, "wan_why": wan_why})
@@ -850,6 +861,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 elif s.get("subject"):
                     chain.append("reconstruction")
                     items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"], k5, cap if k5 == 0 else "", moment=phases.get(s["id"], "")), "rung": "reconstruction"}); k5 += 1
+                elif is_commentary(s):
+                    chain.append("headline"); why.append("commentary stops at unreal; three.js not used")
+                    items.append({"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"})
                 elif (t3 := _threejs_item(cfg, sd, s, sl, chain, why, failed, log)):   # our own 3D diorama before the card (2026-11-21)
                     items.append(t3)
                 else:
@@ -1040,8 +1054,11 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
                 vb["capcut"] = "pending"; chain.append("capcut (pending: one CapCut session after the render)")
         else: vb["capcut"] = "off"
     # 8-10: the beat's visual for the render (provisional when CapCut is pending)
-    t3 = _threejs_item(cfg, sd, s, sl, chain, why, failed, log)   # 8b. our own 3D diorama (2026-11-21)
-    if t3: return t3
+    if not is_commentary(s):
+        t3 = _threejs_item(cfg, sd, s, sl, chain, why, failed, log)   # 8b. our own 3D diorama (2026-11-21)
+        if t3: return t3
+    else:
+        why.append("commentary stops at unreal; three.js not used"); failed.append("threejs")
     chain.append("headline")   # 9. headline card (the illustration rung was removed 2026-10-21)
     return {"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}
 
@@ -1060,6 +1077,7 @@ def rotate_still(src, deg, nose, dst):
 
 def _threejs_item(cfg, sd, s, sl, chain, why, failed, log):
     """owner, 2026-11-21: our own Three.js diorama, tried just before the headline card (60 s cap). -> item | None"""
+    if is_commentary(s): return None
     if not cfg.get("threejs_on", True): return None
     from . import threejs_beat
     clip, w = _safe(log, "threejs", lambda: threejs_beat.make(cfg, s["vo"], FB_SECS, 1080, 1920, sd / "fallback", log, key=f"t3d_{sl['key']}")) or (None, "crashed (see log)")

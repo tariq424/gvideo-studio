@@ -326,10 +326,9 @@ def make(cfg, job, workspace, sec, log):
             # Full-frame video, the same item type as stock and Flow clips (copied into the render's public dir and
             # played by <Vid>). It used to be a small picture-in-picture inside a graphic, shown for at most 3 s and
             # then replaced by a synthetic graphic, so on screen it looked like the beat fell through to graphics.
-            # Own screen recordings (CB-011): crop to the on-screen rendition so portrait cover shows the picture, not chat
-            # text or desktop wallpaper. When no pane is found, ask Remotion to fit the whole landscape frame.
+            # Own landscape screen recordings stay whole. Remotion fit=frame draws the full rendition
+            # over a blurred copy of itself. Cropping the pane out of the recording cuts the picture.
             framing = {}
-            # inspect_video() does not return width/height — probe the file (or OpenCV) for aspect
             try:
                 import cv2
                 _cap = cv2.VideoCapture(str(dest))
@@ -338,15 +337,9 @@ def make(cfg, job, workspace, sec, log):
                 aspect = _w / _h if _h else 0.0
             except Exception:
                 aspect = 0.0
-            if own(job) and aspect > 1.2:   # landscape screen recording: find the picture pane; already-cropped clips skip
-                from . import reframe
-                box = reframe.rendition_box(dest)
-                area = ((box[2] - box[0]) * (box[3] - box[1])) if box else 0.0
-                if box and area < 0.75 and reframe.crop_video_to_box(dest, box, log=log):
-                    framing = {"rendition": True, "framing": "rendition-crop"}
-                else:
-                    framing = {"fit": "frame", "framing": "fit-frame"}
-                    log(f"  {bid}: no clear rendition pane; landscape source will show whole (fit=frame)")
+            if own(job) and aspect > 1.2:
+                framing = {"fit": "frame", "framing": "fit-frame"}
+                log(f"  {bid}: landscape source shown whole on a filled background (fit=frame)")
             secs = round(float(inspect_video(dest).get("duration") or req["duration"]), 2)
             log(f"  {bid}: source clip ready: {dest.name} ({secs:.1f}s at {req['start']:.1f}s of the source), shown full frame"
                 + (f" [{framing.get('framing')}]" if framing else ""))

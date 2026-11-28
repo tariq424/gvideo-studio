@@ -146,7 +146,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
         <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(38px) brightness(0.55)", transform: "scale(1.15)" }} />
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
           <div style={{ width: width, height: (width * 9) / 16, overflow: "hidden", boxShadow: "0 30px 80px rgba(0,0,0,0.6)", transform: `translateY(40px) scale(${z})` }}>
-            <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
         </AbsoluteFill>
       </AbsoluteFill>
