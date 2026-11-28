@@ -193,18 +193,9 @@ def cloud_still(cfg, job, v, vo, log):
     badge(png, d / f"{v['id']}.jpg"); v["cloud"] = res["provider"]
     return True
 
-def illustration_still(cfg, job, v, vo, log):
-    """Long videos, before WanGP: a 16:9 flat illustration / silhouette (illustrate.py, Remotion), rendered as a 6 s animated clip
-    (layer parallax, the aircraft moving at its attitude) -> motion/<id>.mp4 and the visual becomes "motion" (assemble stretches it
-    to its slot); the ILLUSTRATION / SILHOUETTE label is drawn by Remotion. Beats WanGP must not draw (aircraft,
-    vehicles, specific buildings, real people) get the headline card when no illustration fits. -> rung name, or None (WanGP may
-    draw it: atmospheric filler)."""
-    from . import illustrate, review
-    sec = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", "")}
-    ents = _ents(job); opts = illustrate.options(sec, ents); lock = illustrate.wangp_lock(sec, ents)
-    if opts: item = opts[0]
-    elif lock: item = {"type": "graphic", "g": {"kind": "headline", "kicker": "", "text": " ".join(vo.split()[:12]), "sub": ""}, "rung": "headline"}
-    else: return None
+def _paint_illustration(cfg, job, v, item, log):
+    """Render one illustration item to motion/<id>.mp4. Does not decide whether the item matches the prompt."""
+    from . import review
     d = job / "stills"; d.mkdir(exist_ok=True); ws = d / "_illus"; ws.mkdir(exist_ok=True)
     (ws / "space.json").write_text(json.dumps({"orient": "landscape", "still_res": "1920x1088", "i2v_res": "1280x720", "w": 1920, "h": 1080}), encoding="utf-8")
     bg = {k: item[k] for k in ("type", "g")}
@@ -217,10 +208,68 @@ def illustration_still(cfg, job, v, vo, log):
         # (job 20261011_082753: 39 s frozen on one blended frame). Normalise to limited range like every other clip.
         media.ff("-i", raw, "-an", "-vf", "scale=in_range=pc:out_range=tv,format=yuv420p", "-color_range", "tv", "-c:v", "libx264",
                  "-preset", "veryfast", "-crf", 16, clip); raw.unlink(missing_ok=True)
-    except Exception as e: log(f"  illustration {v['id']} failed ({str(e)[:100]})"); return None
-    v["illustration"] = item["rung"]; v["type"] = "motion"; v["g"] = item["g"]   # the explainer renders the graphic itself
-    log(f"  {v['id']}: {item['rung']}" + (f" (WanGP skipped: {lock})" if lock else " (before WanGP)"))
+    except Exception as e:
+        log(f"  {v['id']}: illustration: failed: render error ({str(e)[:100]})")
+        return False
+    v["illustration"] = item.get("rung") or "illustration"; v["type"] = "motion"; v["g"] = item["g"]
+    return True
+
+
+def illustration_still(cfg, job, v, vo, log):
+    """A 16:9 illustration, only when it matches the slot prompt. An interior prompt does not accept an exterior cartoon.
+    -> rung name, or None."""
+    from . import illustrate
+    from .rung_walk import fmt, picture_matches
+    prompt = v.get("prompt") or ""
+    sec = {"id": v["id"], "vo": prompt or vo, "still_prompt": prompt}
+    ents = _ents(job); opts = illustrate.options(sec, ents)
+    if not opts:
+        log(fmt(v["id"], "illustration", "failed", "no illustration fits this prompt"))
+        return None
+    item = opts[0]
+    ok, why = picture_matches(prompt, item)
+    if not ok:
+        log(fmt(v["id"], item.get("rung") or "illustration", "failed", why))
+        return None
+    if not _paint_illustration(cfg, job, v, item, log):
+        return None
+    scene = (item.get("g") or {}).get("scene") or (item.get("g") or {}).get("shape") or item["rung"]
+    log(fmt(v["id"], item["rung"], "fired", f"scene {scene}"))
     return item["rung"]
+
+
+def climb_explainer(cfg, job, v, section_vo, log, wg=None, stop=lambda: False):
+    """Walk every shared rung by name for one explainer slot. The slot prompt is the subject; the section is only
+    how a descent shot finds the flight path."""
+    from .rung_walk import climb, production_attempt
+    prompt = v.get("prompt") or section_vo or ""
+    work = job / "stills" / "_climb" / str(v.get("id") or "slot")
+    work.mkdir(parents=True, exist_ok=True)
+    ctx = {
+        "cfg": cfg, "job": job, "visual": v, "prompt": prompt, "section_vo": section_vo or "",
+        "log": log, "wg": wg, "stop": stop, "ents": _ents(job), "slot_id": v.get("id"), "work": work,
+        "render_unreal": _climb_unreal,
+        "render_illustration": lambda c, item: _paint_illustration(cfg, job, v, item, log),
+    }
+    return climb(v["id"], prompt, section_vo or "", lambda name: production_attempt(name, ctx), log, stop=stop)
+
+
+def _climb_unreal(ctx):
+    """T_DataWall for a descent / flight-path slot. The caller has already decided this slot is one."""
+    from . import flight_path, unreal_mrq
+    v = ctx["visual"]
+    path = flight_path.for_narration(ctx.get("prompt") or "") or flight_path.for_narration(ctx.get("section_vo") or "")
+    if not path:
+        return None, "no published flight path for this beat"
+    out = Path(ctx["job"]) / "motion" / f"{v['id']}_unreal.mp4"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    spec = {"template": "T_DataWall", "title": (ctx.get("prompt") or ctx.get("section_vo") or "")[:40],
+            "subtitle": v["id"], "vo": ctx.get("prompt") or ctx.get("section_vo") or "", "path": path,
+            "width": 1920, "height": 1080, "fps": 30, "duration_s": 6.0, "job_name": v["id"]}
+    clip = unreal_mrq.render_beat(spec, out, cfg=ctx.get("cfg") or {}, log=ctx.get("log"))
+    if not clip:
+        return None, "Unreal MRQ produced nothing"
+    return clip, f"T_DataWall ({len(path)} published points)"
 
 def _ws(job):
     """The landscape workspace for explainer clips made with Remotion (illustrations, GRAPHICS)."""
@@ -331,6 +380,11 @@ def _do_motion_inner(job, plan, cfg, wg, log, stop):
             if v["type"] != "motion" or v.get("stock") or v.get("g") or v.get("v2"): continue   # g / v2: drawn live or decided in B-roll
             seed += 1; out = d / f"{v['id']}.mp4"
             if media.ok(out): continue
+            if not cfg.get("ladder_v2"):
+                # Named walk: stock through the card, Unreal before motion on a flight-path slot.
+                # Cloud and illustration are rungs inside that walk, not a shortcut in front of it.
+                climb_explainer(cfg, job, v, s.get("vo") or "", log, wg=wg, stop=stop)
+                continue
             if (job / "stills" / f"{v['id']}.jpg").exists() or cloud_still(cfg, job, v, s.get("vo", ""), log):   # cloud still
                 v["type"] = "still"; log(f"Motion {v['id']}: cloud still instead of WanGP motion"); continue
             if cfg.get("ladder_v2"):   # v2: WanGP motion only for atmospheric beats; everything else goes down the v2 ladder
@@ -350,21 +404,6 @@ def _do_motion_inner(job, plan, cfg, wg, log, stop):
                 # (image services -> Blender -> Meta video -> Flow -> cloud -> WanGP still -> graphics / physics -> headline)
                 # instead of a WanGP video straight after the cloud still
                 v["type"] = "still"; log(f"Motion {v['id']}: down the image ladder (WanGP only as the last resort)"); continue
-            elif illustration_still(cfg, job, v, s.get("vo", ""), log): continue   # animated illustration clip (motion/<id>.mp4)
-            ok = False
-            for t in range(2):
-                r = wg.gen({"model_type": cfg["video_model"], "prompt": v["prompt"] + STYLE, "resolution": "1280x720",
-                            "video_length": 121, "num_inference_steps": 8, "seed": seed + t * 97}, log, f"motion {v['id']}", stop=stop)
-                if not r["ok"]: continue
-                if qa_available(cfg):
-                    strip = d / f"{v['id']}_qa.jpg"; media.frames_strip(r["file"], strip)
-                    good, issue = qa.check(cfg, strip, v["prompt"] + " (three frames from one video clip)")
-                    if issue.startswith("qa-"): log(f"  motion {v['id']}: image check unavailable ({issue[:120]})")
-                    if not good: log(f"  motion {v['id']}: QA rejected ({issue})"); continue
-                shutil.copy(r["file"], out); ok = True; break
-            if not ok:
-                log(f"  motion {v['id']}: falling back to a still"); v["type"] = "still"
-            else: log(f"Motion {v['id']} done")
 
 def do_stills(job, plan, cfg, wg, log, stop):
     d = job / "stills"; d.mkdir(exist_ok=True); seed = 1000; n = 0
@@ -443,7 +482,7 @@ def do_stills(job, plan, cfg, wg, log, stop):
                 md = job / "motion"; md.mkdir(exist_ok=True)
                 shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = vtag; v.pop("g", None)
                 log(f"  {v['id']}: {vrung} clip"); n += 1; continue
-        if cloud_still(cfg, job, v, vo, log): continue   # cloud first
+        if cfg.get("ladder_v2") and cloud_still(cfg, job, v, vo, log): continue   # v2 cloud still; the named walk tries cloud in order
         if cfg.get("ladder_v2"):   # v2: WanGP still for atmospheric beats, then graphics -> physics -> illustration -> headline
             from . import illustrate
             lock = illustrate.wangp_lock({"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", "")}, _ents(job))
@@ -462,9 +501,7 @@ def do_stills(job, plan, cfg, wg, log, stop):
                     log(f"  {v['id']}: ladder failed ({type(e).__name__}: {str(e)[:120]}); headline card")
                     v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(vo.split()[:12]), "sub": ""}
             n += 1; continue
-        if illustration_still(cfg, job, v, vo, log): continue   # then illustration / silhouette; WanGP only for atmospheric filler
-        if not _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}"):
-            raise RuntimeError(f"still {v['id']} failed")
+        climb_explainer(cfg, job, v, vo, log, wg=wg, stop=stop)
         n += 1
         if n % 10 == 0: log(f"Stills: {i+1}/{len(todo)}")
     log(f"Stills done: {len(todo)}")

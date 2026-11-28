@@ -949,7 +949,10 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 c["seen"] = seen; got.append({k: c.get(k) for k in ("id", "src", "orient", "query", "dur", "w", "h", "file", "page", "author", "desc", "seen")}); used.add(cid)
             st["picked"][s["id"]] = got; save()
             lock = f" [subject: {sj['name']}]" if sj else ""
-            log(f"  {s['id']}{lock}: {len(got)}/{need[s['id']]} clip(s): " + "; ".join(f"{g['src']}: {g['seen'][:45]}" for g in got) if got else f"  {s['id']}{lock}: nothing suitable")
+            if got:
+                log(f"  {s['id']}{lock}: {len(got)}/{need[s['id']]} clip(s): " + "; ".join(f"{g['src']}: {g['seen'][:45]}" for g in got))
+            else:
+                log(f"  {s['id']}: stock: failed: nothing suitable")
     finally:
         unload_vet_model(cfg)
     # download (only the seconds we need)

@@ -520,7 +520,12 @@ def ladder(job, bid, k=None, visual=None):
         if not m: continue
         sl = slots.setdefault(m.group(1), {"slot": m.group(1), "used": None, "failed": []})
         msg = _clean(m.group(2))
-        if _FAILWORD.search(msg): sl["failed"].append(["", msg])
+        named = re.match(r"^([A-Za-z][\w_]*): (failed|skipped|fired): (.*)$", msg)
+        if named:
+            rung, status, why = named.group(1), named.group(2), named.group(3)
+            if status == "fired": sl["used"] = _clean(f"{rung}: {why}", 90)
+            else: sl["failed"].append([rung, _clean(f"{status}: {why}")])
+        elif _FAILWORD.search(msg): sl["failed"].append(["", msg])
         else: sl["used"] = _clean(msg, 90)
     # owner, 2026-11-19: every picture says where it came from, even when no rung ran for it (a planned chart, a source or
     # stock match) - "No ladder record" left the viewer guessing whether everything had failed
