@@ -97,10 +97,9 @@ def bind_camera_cut(fps, duration_s, width, height):
     explicit_section_end(section, end)
     if cam is not None:
         binding = sequence.add_possessable(cam)
-        try:
-            section.set_camera_binding_id(sequence.make_binding_id(binding, unreal.MovieSceneObjectBindingSpace.LOCAL))
-        except Exception:
-            section.set_camera_binding_id(binding.get_binding_id())
+        # UE 5.8: LevelSequence has no make_binding_id, and the binding proxy has no get_binding_id.
+        bid = unreal.MovieSceneSequenceExtensions.get_portable_binding_id(sequence, sequence, binding)
+        section.set_camera_binding_id(bid)
     unreal.EditorAssetLibrary.save_asset(seq_path)
     return sequence, end
 
